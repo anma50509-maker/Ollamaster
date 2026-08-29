@@ -38,6 +38,32 @@ public class ConvStore {
             return s.trim();
         }
 
+
+        private static final java.util.regex.Pattern THINK_RE =
+                java.util.regex.Pattern.compile("(?is) thinking\s*(.*?)\s*response");
+        private static final java.util.regex.Pattern THINK_TAIL =
+                java.util.regex.Pattern.compile("(?is) thinking\s*(.*)$");
+
+        /** 计算回传给 API 的 reasoning_content：
+         *  优先独立字段 → content 中 thinking 块 → 带 tool_calls 时给非空兜底（严格端点拒绝空串）。 */
+        private String reasoningForApi() {
+            if (reasoning != null && !reasoning.isEmpty()) return reasoning;
+            String t = thinkingOf(content);
+            if (!t.isEmpty()) return t;
+            if (tools != null && !tools.isEmpty()) return "（该轮无思考过程记录）";
+            return "";
+        }
+
+        /** 从带 thinking 标签的 content 中提取思考文本 */
+        private static String thinkingOf(String c) {
+            if (c == null) return "";
+            java.util.regex.Matcher m = THINK_RE.matcher(c);
+            if (m.find()) return m.group(1).trim();
+            m = THINK_TAIL.matcher(c);
+            if (m.find()) return m.group(1).trim();
+            return "";
+        }
+
         public JSONObject toJsonOllama() {
             try {
                 JSONObject o = new JSONObject();
@@ -45,18 +71,22 @@ public class ConvStore {
                 o.put("content", "assistant".equals(role) ? apiContent() : apiUserContent());
                 JSONArray imgs = imagesB64();
                 if (imgs.length() > 0) o.put("images", imgs);
-                if ("assistant".equals(role) && tools != null && !tools.isEmpty()) {
-                    JSONArray tc = new JSONArray();
-                    for (ToolCall t : tools) {
-                        JSONObject f = new JSONObject();
-                        f.put("name", t.name);
-                        Object a = argObj(t.args);
-                        f.put("arguments", a);
-                        JSONObject w = new JSONObject();
-                        w.put("function", f);
-                        tc.put(w);
+                if ("assistant".equals(role)) {
+                    // 思考模型历史工具调用回传 thinking（仅真实思考，避免占位文本污染本地上下文）
+                    if (reasoning != null && !reasoning.isEmpty()) o.put("thinking", reasoning);
+                    if (tools != null && !tools.isEmpty()) {
+                        JSONArray tc = new JSONArray();
+                        for (ToolCall t : tools) {
+                            JSONObject f = new JSONObject();
+                            f.put("name", t.name);
+                            Object a = argObj(t.args);
+                            f.put("arguments", a);
+                            JSONObject w = new JSONObject();
+                            w.put("function", f);
+                            tc.put(w);
+                        }
+                        o.put("tool_calls", tc);
                     }
-                    o.put("tool_calls", tc);
                 }
                 return o;
             } catch (Exception e) { return new JSONObject(); }
@@ -85,8 +115,11 @@ public class ConvStore {
                 }
                 if ("assistant".equals(role)) {
                     // 始终传 reasoning_content（API 要求 thinking + tool_calls 时必须传）
-                    if (reasoning != null && !reasoning.isEmpty()) {
-                        o.put("reasoning_content", reasoning);
+                    // 三层防御：真实 reasoning → content 中 thinking 块 → 带 tool_calls 时非空兜底
+                    // （部分 DeepSeek 兼容端点拒绝空串 reasoning_content，见官方文档 Tool Calls 章节）
+                    String rc = reasoningForApi();
+                    if (!rc.isEmpty()) {
+                        o.put("reasoning_content", rc);
                     } else if (tools != null && !tools.isEmpty()) {
                         o.put("reasoning_content", "");
                     }
