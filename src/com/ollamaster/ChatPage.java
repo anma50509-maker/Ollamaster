@@ -807,7 +807,7 @@ public class ChatPage extends Page {
                         entries.add(new ModelEntry(m, "本地", "", ""));
                     }
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception e) { ErrLog.log(act, "loadModels", e); }
             ArrayList<ModelEntry> fentries = entries;
             ArrayList<String> fgot = got;
             Ui.H.post(() -> {
@@ -1262,7 +1262,7 @@ public class ChatPage extends Page {
                     msg.tools.add(call);
                 }
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) { ErrLog.log(act, "parseOllamaTools", e); }
     }
 
     private void parseCloudTools(ConvStore.Msg msg, String toolsJson) {
@@ -1284,7 +1284,7 @@ public class ChatPage extends Page {
                     msg.tools.add(call);
                 }
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) { ErrLog.log(act, "parseCloudTools", e); }
     }
 
 
@@ -1550,7 +1550,7 @@ public class ChatPage extends Page {
         try {
             if (on) AgentService.start(act);
             else AgentService.stop(act);
-        } catch (Exception ignored) {}
+        } catch (Exception e) { ErrLog.log(act, "syncAgent", e); }
     }
 
     private void busyUi(boolean b) {
@@ -2298,6 +2298,6 @@ public class ChatPage extends Page {
                 if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
                 if (wifiLock != null && wifiLock.isHeld()) wifiLock.release();
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) { ErrLog.log(act, "holdAwake", e); }
     }
 }

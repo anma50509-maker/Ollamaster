@@ -5,6 +5,14 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 B="$HOME/projects/Ollamaster-build"
 W="$B/proj"
 O="$B/out"
+# 产物输出目录 = 项目根（source/ 的上一级）
+OUT="$(dirname "$ROOT")"
+
+# 版本水印：从 AndroidManifest 提取 versionName + 构建时间，生成带标记的副本
+VERSION="$(sed -n 's/.*android:versionName="\([^"]*\)".*/\1/p' "$ROOT/AndroidManifest.xml" | head -1)"
+[ -z "$VERSION" ] && VERSION="dev"
+STAMP="$(date +%Y%m%d-%H%M)"
+TAGGED="Ollamaster-${VERSION}-${STAMP}.apk"
 
 rm -rf "$W" "$O"
 mkdir -p "$W" "$O/gen" "$O/classes" "$O/dex"
@@ -51,6 +59,11 @@ apksigner sign --ks "$B/keystore.jks" \
     --out "$B/Ollamaster.apk" "$O/aligned.apk"
 
 apksigner verify "$B/Ollamaster.apk" && echo "VERIFY OK"
-cp "$B/Ollamaster.apk" "$ROOT/../Ollamaster.apk"
-ls -la "$ROOT/Ollamaster.apk"
-echo "BUILD DONE -> $ROOT/Ollamaster.apk"
+
+# 输出：固定名（供脚本引用）+ 带版本水印副本（供人识别新旧）
+# 先清理旧的带版本号副本，避免项目根堆积，但不动固定名 Ollamaster.apk
+rm -f "$OUT"/Ollamaster-*.apk 2>/dev/null || true
+cp "$B/Ollamaster.apk" "$OUT/Ollamaster.apk"
+cp "$B/Ollamaster.apk" "$OUT/$TAGGED"
+ls -la "$OUT/Ollamaster.apk" "$OUT/$TAGGED"
+echo "BUILD DONE -> $OUT/Ollamaster.apk  (+$TAGGED)"

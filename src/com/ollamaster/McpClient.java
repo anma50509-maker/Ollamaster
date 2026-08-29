@@ -32,7 +32,7 @@ public class McpClient {
                 String k = it.next();
                 h.put(k, String.valueOf(extra.opt(k)));
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) { ErrLog.log(App.inst, "mcp.headers", e); }
         return h;
     }
 
@@ -127,7 +127,7 @@ public class McpClient {
             os.close();
             c.getResponseCode();
             c.disconnect();
-        } catch (Exception ignored) {}
+        } catch (Exception e) { ErrLog.log(App.inst, "mcp.initialize", e); }
     }
 
     public static synchronized JSONArray listTools(Mcps.Server s) throws Exception {
