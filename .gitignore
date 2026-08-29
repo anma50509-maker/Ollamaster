@@ -1,0 +1,15 @@
+# 构建产物
+*.apk
+*.log
+build/
+out/
+gen/
+classes/
+dex/
+
+# 临时文件
+*.tmp
+*~
+
+# 密钥（位于源码仓库之外，此处兜底防误提交）
+*.jks
