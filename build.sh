@@ -51,6 +51,6 @@ apksigner sign --ks "$B/keystore.jks" \
     --out "$B/Ollamaster.apk" "$O/aligned.apk"
 
 apksigner verify "$B/Ollamaster.apk" && echo "VERIFY OK"
-cp "$B/Ollamaster.apk" "$ROOT/Ollamaster.apk"
+cp "$B/Ollamaster.apk" "$ROOT/../Ollamaster.apk"
 ls -la "$ROOT/Ollamaster.apk"
 echo "BUILD DONE -> $ROOT/Ollamaster.apk"

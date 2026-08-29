@@ -40,9 +40,9 @@ public class ConvStore {
 
 
         private static final java.util.regex.Pattern THINK_RE =
-                java.util.regex.Pattern.compile("(?is) thinking\s*(.*?)\s*response");
+                java.util.regex.Pattern.compile("(?is) thinking\\s*(.*?)\\s*response");
         private static final java.util.regex.Pattern THINK_TAIL =
-                java.util.regex.Pattern.compile("(?is) thinking\s*(.*)$");
+                java.util.regex.Pattern.compile("(?is) thinking\\s*(.*)$");
 
         /** 计算回传给 API 的 reasoning_content：
          *  优先独立字段 → content 中 thinking 块 → 带 tool_calls 时给非空兜底（严格端点拒绝空串）。 */
