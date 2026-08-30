@@ -16,6 +16,10 @@ import android.text.style.RelativeSizeSpan;
 import android.text.style.StrikethroughSpan;
 import android.text.style.StyleSpan;
 import android.view.View;
+import android.view.ViewGroup;
+import android.widget.HorizontalScrollView;
+import android.widget.LinearLayout;
+import android.widget.TextView;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
@@ -524,4 +528,93 @@ public class Markdown {
             ds.setColor(ds.linkColor == 0 ? 0xFF4A90D9 : ds.linkColor);
         }
     }
+
+    // ==================== 富文本视图（表格 → 可滚动真视图） ====================
+
+    /** 富文本渲染结果：text=普通文本(Spannable)，views=表格视图列表（紧邻文本显示） */
+    public static class RichResult {
+        public CharSequence text = "";
+        public java.util.List<View> views = new java.util.ArrayList<>();
+    }
+
+    /**
+     * 富文本分段渲染：把 Markdown 源中的表格块提取为可横向滚动的表格视图，
+     * 其余文本照常由 render() 渲染为 Spannable。表格视图与文本紧密排列。
+     */
+    public static RichResult prepareRich(Context ctx, String raw, Theme t) {
+        RichResult r = new RichResult();
+        if (raw == null) return r;
+        StringBuilder acc = new StringBuilder();
+        String[] parts = raw.split("```", -1);
+        for (int i = 0; i < parts.length; i++) {
+            if (i % 2 == 1) {
+                // 代码块：保留围栏原样，交给 render() 处理
+                acc.append("```").append(parts[i]).append("```");
+                continue;
+            }
+            String[] lines = parts[i].split("\n", -1);
+            for (int li = 0; li < lines.length; li++) {
+                String line = lines[li];
+                if (P_TABLE_ROW.matcher(line).matches() && li + 1 < lines.length
+                        && P_TABLE_SEP.matcher(lines[li + 1]).matches()) {
+                    java.util.List<String> rows = new java.util.ArrayList<>();
+                    rows.add(line);
+                    li++;
+                    rows.add(lines[li]);
+                    while (li + 1 < lines.length && P_TABLE_ROW.matcher(lines[li + 1]).matches()) {
+                        li++;
+                        rows.add(lines[li]);
+                    }
+                    r.views.add(buildTableView(ctx, rows, t));
+                    continue;
+                }
+                acc.append(line).append('\n');
+            }
+        }
+        r.text = render(ctx, acc.toString(), t);
+        return r;
+    }
+
+    /**
+     * 构建表格视图：HorizontalScrollView（左右滑动）+ 行/列 LinearLayout。
+     * 单元格为 TextView，渲染嵌套 inline MD（加粗/链接/代码/斜体/高亮等），文字居中。
+     * 上下滑动跟随消息列表本身。
+     */
+    public static View buildTableView(Context ctx, java.util.List<String> rows, Theme t) {
+        android.widget.HorizontalScrollView hsv = new android.widget.HorizontalScrollView(ctx);
+        hsv.setHorizontalScrollBarEnabled(true);
+        hsv.setVerticalScrollBarEnabled(false);
+        hsv.setFillViewport(false);
+
+        LinearLayout table = new LinearLayout(ctx);
+        table.setOrientation(LinearLayout.VERTICAL);
+        int pad = Ui.dpi(ctx, 9);
+        float dpr = ctx.getResources().getDisplayMetrics().density;
+
+        for (int ri = 0; ri < rows.size(); ri++) {
+            if (ri == 1) continue; // 分隔行（仅用于对齐信息，此处统一居中）
+            java.util.List<String> cells = splitRow(rows.get(ri));
+            LinearLayout rowL = new LinearLayout(ctx);
+            rowL.setOrientation(LinearLayout.HORIZONTAL);
+            for (int ci = 0; ci < cells.size(); ci++) {
+                SpannableStringBuilder sb = new SpannableStringBuilder();
+                inline(sb, cells.get(ci), t); // 嵌套 MD 渲染
+                TextView cellTv = new TextView(ctx);
+                cellTv.setText(sb);
+                cellTv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, Ui.spi(ctx, 12.5f));
+                cellTv.setGravity(android.view.Gravity.CENTER);
+                cellTv.setPadding(pad, Ui.dpi(ctx, 6), pad, Ui.dpi(ctx, 6));
+                int bg = ri == 0 ? t.alpha(t.accent, 0.11f) : android.graphics.Color.TRANSPARENT;
+                cellTv.setBackground(Ui.stroke(bg, t.alpha(t.border, 1f), 1, Math.max(1, dpr * 0.7f)));
+                rowL.addView(cellTv, new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            }
+            table.addView(rowL, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        }
+        hsv.addView(table, new android.widget.HorizontalScrollView.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        return hsv;
+    }
+
 }

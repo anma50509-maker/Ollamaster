@@ -1683,8 +1683,16 @@ public class ChatPage extends Page {
             applyThinkBlock(think, "think|" + m.ts, thinkText);
         }
         CharSequence rendered;
+        java.util.List<View> richTables = null;
         try {
-            rendered = Markdown.render(act, answerText.isEmpty() && streaming ? "▍" : answerText, t);
+            if (!streaming) {
+                // 完整答案：富文本分段渲染（表格 → 可滚动视图，紧邻文本）
+                Markdown.RichResult rr = Markdown.prepareRich(act, answerText, t);
+                rendered = rr.text;
+                richTables = rr.views;
+            } else {
+                rendered = Markdown.render(act, answerText.isEmpty() ? "▍" : answerText, t);
+            }
         } catch (Throwable e) {
             rendered = answerText;
         }
@@ -1692,6 +1700,15 @@ public class ChatPage extends Page {
         tv.setVisibility(answerText.isEmpty() && !streaming ? View.GONE : View.VISIBLE);
         col.addView(tv, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        if (richTables != null && !richTables.isEmpty()) {
+            for (View tvT : richTables) {
+                LinearLayout.LayoutParams tableLp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                tableLp.topMargin = Ui.dpi(act, 3);
+                tableLp.rightMargin = Ui.dpi(act, 30);
+                col.addView(tvT, tableLp);
+            }
+        }
 
         TextView meta = new TextView(act);
         StringBuilder mt = new StringBuilder(tf.format(new java.util.Date(m.ts)));
