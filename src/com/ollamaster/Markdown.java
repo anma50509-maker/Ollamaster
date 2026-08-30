@@ -104,7 +104,7 @@ public class Markdown {
                     i++;
                     rows.add(lines[i]);
                 }
-                table(out, rows, t);
+                table(ctx, out, rows, t);
                 out.append("\n");
                 continue;
             }
@@ -169,26 +169,23 @@ public class Markdown {
 
     // ==================== 表格 ====================
 
-    private static void table(SpannableStringBuilder out, List<String> rows, Theme t) {
+    /** 表格 → 独立 Bitmap 渲染，以 ImageSpan 内嵌显示（列对齐/边框/表头由 Canvas 精确控制） */
+    private static void table(Context ctx, SpannableStringBuilder out, List<String> rows, Theme t) {
         List<List<String>> data = new ArrayList<>();
-        int alignsMask = 0; // 每列 2bit：0=左 1=中 2=右
-        // rows 结构：[表头行, 分隔行, 数据行...]
+        int alignsMask = 0;
         for (int ri = 0; ri < rows.size(); ri++) {
             if (ri == 0) {
                 data.add(splitRow(rows.get(ri)));
                 continue;
             }
             if (ri == 1) {
-                // 分隔行 → 解析列对齐 (:--- 左  :---: 中  ---: 右)
                 String s = rows.get(ri).trim();
                 if (s.startsWith("|")) s = s.substring(1);
                 if (s.endsWith("|")) s = s.substring(0, s.length() - 1);
                 int ci = 0;
                 for (String cell : s.split("\\|", -1)) {
                     String c = cell.trim();
-                    int a = 0;
-                    if (c.startsWith(":") && c.endsWith(":")) a = 1;
-                    else if (c.endsWith(":")) a = 2;
+                    int a = (c.startsWith(":") && c.endsWith(":")) ? 1 : (c.endsWith(":") ? 2 : 0);
                     alignsMask |= (a << (ci * 2));
                     ci++;
                 }
@@ -196,50 +193,134 @@ public class Markdown {
             }
             data.add(splitRow(rows.get(ri)));
         }
+        if (data.isEmpty()) return;
+        final float dpr = ctx.getResources().getDisplayMetrics().density;
         int ncol = 0;
         for (List<String> r : data) ncol = Math.max(ncol, r.size());
-        int[] widths = new int[ncol];
+        if (ncol == 0) return;
+
+        TextPaint tp = new TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        tp.setTextSize(Ui.spi(ctx, 11));
+        tp.setTypeface(Typeface.MONOSPACE);
+        float pad = 8 * dpr;
+        float fmTop = tp.getFontMetrics().top, fmBot = tp.getFontMetrics().bottom;
+        float lineH = (fmBot - fmTop) + 5 * dpr;
+        float maxW = ctx.getResources().getDisplayMetrics().widthPixels - Ui.dpi(ctx, 70);
+        float colLimit = Math.max(70 * dpr, maxW / ncol);
+
+        float[] colW = new float[ncol];
         for (List<String> r : data) {
             for (int i = 0; i < r.size() && i < ncol; i++) {
-                int w = dispWidth(r.get(i)) + 1;
-                if (w > widths[i]) widths[i] = w;
+                float nat = 0;
+                for (String part : r.get(i).split("\n", -1)) {
+                    float m = tp.measureText(part);
+                    if (m > nat) nat = m;
+                }
+                float w = Math.min(nat, colLimit) + pad;
+                if (w > colW[i]) colW[i] = w;
             }
         }
-        int hyphens = 0;
-        for (int w : widths) hyphens += w + 1;
-        // 顶边框
-        char[] topBar = new char[hyphens + 1];
-        java.util.Arrays.fill(topBar, '─');
-        String bar = "┌" + new String(topBar) + "┐\n";
-        appendMono(out, bar, t);
-        boolean hdr = true;
-        for (List<String> r : data) {
-            StringBuilder sb = new StringBuilder("│ ");
+        float totalW = 0;
+        for (float w : colW) totalW += w;
+        totalW += 2 * dpr;
+        int maxLines = 40;
+        int[] rowLines = new int[data.size()];
+        for (int ri = 0; ri < data.size(); ri++) {
+            int ml = 1;
+            List<String> r = data.get(ri);
             for (int i = 0; i < ncol; i++) {
                 String cell = i < r.size() ? r.get(i) : "";
-                int a = (alignsMask >> (i * 2)) & 3;
-                String pad = padCell(cell, widths[i], a);
-                sb.append(pad);
-                if (i < ncol - 1) sb.append(" │ ");
+                int l = wrapLines(cell, tp, colW[i] - pad - dpr, maxLines).size();
+                if (l > ml) ml = l;
             }
-            sb.append(" │\n");
-            int start = out.length();
-            appendMono(out, sb.toString(), t);
-            if (hdr) {
-                // 表头加粗
-                out.setSpan(new StyleSpan(Typeface.BOLD), start, out.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                hdr = false;
-            }
+            rowLines[ri] = Math.min(ml, maxLines);
         }
-        char[] botBar = new char[hyphens + 1];
-        java.util.Arrays.fill(botBar, '─');
-        appendMono(out, "└" + new String(botBar) + "┘\n", t);
+        float totalH = 2 * dpr;
+        for (int l : rowLines) totalH += l * lineH;
+        totalH += dpr;
+
+        android.graphics.Bitmap bmp = android.graphics.Bitmap.createBitmap(
+                Math.max(1, (int) totalW), Math.max(1, (int) totalH),
+                android.graphics.Bitmap.Config.ARGB_8888);
+        android.graphics.Canvas cv = new android.graphics.Canvas(bmp);
+        cv.drawColor(t.surface);
+
+        android.graphics.Paint line = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        line.setColor(t.alpha(t.border, 1f));
+        line.setStrokeWidth(Math.max(1, dpr * 0.7f));
+        android.graphics.Paint headBg = new android.graphics.Paint();
+        headBg.setColor(t.alpha(t.accent, 0.13f));
+
+        float y = dpr;
+        for (int ri = 0; ri < data.size(); ri++) {
+            float rowH = rowLines[ri] * lineH;
+            if (ri == 0) cv.drawRect(0, y, totalW, y + rowH, headBg);
+            List<String> r = data.get(ri);
+            float cx = dpr;
+            for (int i = 0; i < ncol; i++) {
+                String cell = i < r.size() ? r.get(i) : "";
+                int align = (alignsMask >> (i * 2)) & 3;
+                int maxL = Math.min(maxLines, rowLines[ri]);
+                List<String> ws = wrapLines(cell, tp, colW[i] - pad - dpr, maxL);
+                tp.setColor(ri == 0 ? t.textPri : t.textSec);
+                tp.setFakeBoldText(ri == 0);
+                float baseY = y + lineH + fmTop + 2 * dpr;
+                for (int li = 0; li < ws.size(); li++) {
+                    String w = ws.get(li);
+                    float tx;
+                    if (align == 1) { tp.setTextAlign(android.graphics.Paint.Align.CENTER); tx = cx + colW[i] / 2f; }
+                    else if (align == 2) { tp.setTextAlign(android.graphics.Paint.Align.RIGHT); tx = cx + colW[i] - pad - dpr; }
+                    else { tp.setTextAlign(android.graphics.Paint.Align.LEFT); tx = cx + pad; }
+                    cv.drawText(w, tx, baseY + li * lineH, tp);
+                }
+                cx += colW[i];
+            }
+            y += rowH;
+            cv.drawLine(0, y, totalW, y, line);
+        }
+        float vx = dpr;
+        for (int i = 0; i <= ncol; i++) {
+            cv.drawLine(vx, 0, vx, totalH, line);
+            if (i < ncol) vx += colW[i];
+        }
+
+        if (out.length() > 0 && out.charAt(out.length() - 1) != '\n') out.append("\n");
+        int start = out.length();
+        out.append("\uFFFC");
+        out.setSpan(new android.text.style.ImageSpan(ctx, bmp, android.text.style.ImageSpan.ALIGN_BOTTOM),
+                start, out.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        out.append("\n");
     }
 
-    private static void appendMono(SpannableStringBuilder out, String s, Theme t) {
-        int start = out.length();
-        out.append(s);
-        out.setSpan(new MonoSpan(), start, out.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+    /** 按可用宽度折行（支持显式换行符；超 maxLines 截断） */
+    private static List<String> wrapLines(String s, TextPaint tp, float availW, int maxLines) {
+        List<String> outL = new ArrayList<>();
+        if (s == null || s.isEmpty()) { outL.add(""); return outL; }
+        for (String seg : s.split("\n", -1)) {
+            if (seg.isEmpty()) { if (outL.size() < maxLines) outL.add(""); continue; }
+            StringBuilder cur = new StringBuilder();
+            for (int i = 0; i < seg.length(); ) {
+                int cp = seg.codePointAt(i);
+                String ch = new String(Character.toChars(cp));
+                if (tp.measureText(ch) > availW && cur.length() == 0) {
+                    outL.add(ch);
+                    i += Character.charCount(cp);
+                    if (outL.size() >= maxLines) break;
+                    continue;
+                }
+                if (tp.measureText(cur.toString() + ch) > availW && cur.length() > 0) {
+                    outL.add(cur.toString());
+                    cur.setLength(0);
+                    if (outL.size() >= maxLines) break;
+                }
+                cur.append(ch);
+                i += Character.charCount(cp);
+            }
+            if (cur.length() > 0 && outL.size() < maxLines) outL.add(cur.toString());
+            if (outL.size() >= maxLines) break;
+        }
+        if (outL.isEmpty()) outL.add("");
+        return outL;
     }
 
     private static List<String> splitRow(String line) {
@@ -252,35 +333,7 @@ public class Markdown {
     }
 
     /** 东亚字符按 2 列宽、ASCII 按 1 列宽 */
-    private static int dispWidth(String s) {
-        int w = 0;
-        for (int i = 0; i < s.length(); i++) {
-            char c = s.charAt(i);
-            w += (c >= 0x1100 && (c <= 0x115F || (c >= 0x2E80 && c <= 0xA4CF)
-                    || (c >= 0xAC00 && c <= 0xD7A3) || c >= 0xF900 && c <= 0xFAFF
-                    || c >= 0xFE30 && c <= 0xFE4F || c >= 0xFF00 && c <= 0xFF60
-                    || c >= 0xFFE0 && c <= 0xFFE6)) ? 2 : 1;
-        }
-        return w;
-    }
 
-    private static String padCell(String cell, int width, int align) {
-        int d = width - dispWidth(cell);
-        if (d <= 0) return cell;
-        StringBuilder sb = new StringBuilder();
-        if (align == 1) { // 居中
-            for (int i = 0; i < d / 2; i++) sb.append(' ');
-            sb.append(cell);
-            for (int i = 0; i < d - d / 2; i++) sb.append(' ');
-        } else if (align == 2) { // 右对齐
-            for (int i = 0; i < d; i++) sb.append(' ');
-            sb.append(cell);
-        } else { // 左对齐
-            sb.append(cell);
-            for (int i = 0; i < d; i++) sb.append(' ');
-        }
-        return sb.toString();
-    }
 
     // ==================== 行内 ====================
 
