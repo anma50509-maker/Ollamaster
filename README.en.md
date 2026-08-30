@@ -20,6 +20,7 @@ featuring an Agent tool loop, hot-pluggable plugin system, MCP client, skills an
 - 🔄 **Agent tool loop**: AI autonomously invokes tools like file, command, web, skills, MCP, and plugin management
 - 🧩 **Hot-pluggable plugin system**: Declarative UI JSON → native Views; install/uninstall/enable/disable on the fly, no recompilation
 - 🔌 **MCP client**: Streamable HTTP protocol support to connect external MCP servers and extend capabilities
+- 🧠 **Long-term memory**: drawer-nested categorized storage; AI can read/write/search/manage (mem_* tools + memory skill + dedicated page)
 - 🎭 **Skills & personas**: Inject custom system prompts and persona cards to shape AI behavior
 - 🛠 **Built-in workbench**: Code editor, terminal, browser, and conversation management
 - 💾 **Conversation persistence**: Multi-model message serialization for seamless resume
@@ -42,6 +43,7 @@ featuring an Agent tool loop, hot-pluggable plugin system, MCP client, skills an
 | `Skills.java` / `Personas.java` | Skill injection and persona cards |
 | `ConvStore.java` | Conversation storage and multi-model message serialization |
 | `AgentService.java` | Foreground service keep-alive for long tasks |
+| `MemoryStore.java` / `MemoryPage.java` | Drawer-nested memory library (storage + management page) |
 
 ## 🧩 Plugin System
 

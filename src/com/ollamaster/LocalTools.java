@@ -65,6 +65,24 @@ public class LocalTools {
                     new String[]{"id"}, new String[]{"插件 id"}, new String[]{"id"}));
             out.put(fn2("disable_plugin", "禁用一个插件，暂停其所有功能但保留安装",
                     new String[]{"id"}, new String[]{"插件 id"}, new String[]{"id"}));
+        out.put(fn2("mem_list", "列出记忆库条目目录（按 id/标题/分类/更新时间），可用分类过滤",
+                new String[]{"category"}, new String[]{"分类路径（如 工作/后端），空则列出全部"}, null));
+        out.put(fn2("mem_read", "读取一条记忆的完整内容（按 id）",
+                new String[]{"id"}, new String[]{"记忆条目 id（mem_list/mem_search 获取）"}, new String[]{"id"}));
+        out.put(fn2("mem_search", "按关键词搜索记忆库（匹配标题/内容/标签/分类），返回匹配条目列表",
+                new String[]{"query"}, new String[]{"搜索关键词"}, new String[]{"query"}));
+        out.put(fn2("mem_write", "保存一条记忆（title 已存在则覆盖更新）。category 用「大类/子类」斜杠分层实现抽屉嵌套",
+                new String[]{"title", "content", "category", "tags"},
+                new String[]{"标题（必填，简洁概括）", "内容（完整记录）", "分类路径，如 工作/项目/后端（可空）", "标签，逗号分隔（可选）"},
+                new String[]{"title", "content"}));
+        out.put(fn2("mem_update", "更新一条已有记忆（只更新传入的字段；无 id 时按 title 匹配）",
+                new String[]{"id", "title", "content", "category", "tags"},
+                new String[]{"要更新的记忆 id", "新标题", "新内容", "新分类路径", "新标签"},
+                new String[]{"id"}));
+        out.put(fn2("mem_delete", "删除一条记忆（按 id）",
+                new String[]{"id"}, new String[]{"要删除的记忆 id"}, new String[]{"id"}));
+        out.put(fn2("mem_stats", "统计记忆库规模（总条数/分类抽屉数/分类树/最近更新时间）",
+                null, null, null));
         } catch (Exception ignored) {}
         return out;
     }
@@ -143,6 +161,8 @@ public class LocalTools {
             case "create_mcp": case "delete_mcp": case "task_complete":
             case "install_plugin": case "uninstall_plugin":
             case "list_plugins": case "enable_plugin": case "disable_plugin":
+            case "mem_list": case "mem_read": case "mem_search":
+            case "mem_write": case "mem_update": case "mem_delete": case "mem_stats":
                 return true;
             default:
                 return false;
@@ -172,6 +192,13 @@ public class LocalTools {
             case "list_plugins": return listPlugins();
             case "enable_plugin": return enablePlugin(args);
             case "disable_plugin": return disablePlugin(args);
+            case "mem_list": return MemoryStore.listText(args.optString("category", ""));
+            case "mem_read": return MemoryStore.readText(args.getString("id"));
+            case "mem_search": return MemoryStore.searchText(args.getString("query"));
+            case "mem_write": return MemoryStore.write(args);
+            case "mem_update": return MemoryStore.update(args);
+            case "mem_delete": return MemoryStore.remove(args.getString("id"));
+            case "mem_stats": return MemoryStore.statsText();
             default: throw new Exception("未知工具: " + name);
         }
     }

@@ -67,6 +67,7 @@ public class MainActivity extends Activity {
         Personas.ensureSeed(this);
         pages.put("chat", new ChatPage(this));
         pages.put("work", new WorkPage(this));
+        pages.put("mem", new MemoryPage(this));
         pages.put("web", new WebPage(this));
         pages.put("term", new TermPage(this));
         pages.put("set", new SettingsPage(this));
@@ -195,6 +196,7 @@ public class MainActivity extends Activity {
         ks.add("chat");
         if (Prefs.get(this).editMode()) {
             ks.add("work");
+            ks.add("mem");
             ks.add("web");
             ks.add("term");
             // 插件页面注册到导航栏
@@ -245,6 +247,7 @@ public class MainActivity extends Activity {
     private int iconFor(String key) {
         switch (key) {
             case "work": return R.drawable.ic_tab_work;
+            case "mem": return R.drawable.ic_tab_mem;
             case "web": return R.drawable.ic_tab_web;
             case "term": return R.drawable.ic_tab_term;
             case "set": return R.drawable.ic_tab_set;
@@ -258,6 +261,7 @@ public class MainActivity extends Activity {
         switch (key) {
             case "chat": return "对话";
             case "work": return "工作台";
+            case "mem": return "记忆";
             case "web": return "浏览器";
             case "term": return "终端";
             default:
