@@ -698,16 +698,19 @@ public class Markdown {
         public void addRow(java.util.List<CharSequence> cells, boolean header) {
             LinearLayout row = new LinearLayout(getContext());
             row.setOrientation(HORIZONTAL);
+            row.setGravity(android.view.Gravity.CENTER_VERTICAL); // 行内垂直居中
             for (int ci = 0; ci < colW.length; ci++) {
                 CharSequence txt = ci < cells.size() ? cells.get(ci) : "";
                 TextView cell = new TextView(getContext());
                 cell.setText(txt);
                 cell.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, Ui.spi(getContext(), 12.5f));
-                cell.setGravity(android.view.Gravity.CENTER);
-                cell.setPadding(0, Ui.dpi(getContext(), 6), 0, Ui.dpi(getContext(), 6));
+                cell.setGravity(android.view.Gravity.CENTER);          // 水平+垂直居中
+                cell.setTextAlignment(android.view.View.TEXT_ALIGNMENT_CENTER); // 强制文本居中
+                cell.setIncludeFontPadding(false);                     // 关闭字体上下留白，垂直更准
+                cell.setPadding(0, Ui.dpi(getContext(), 7), 0, Ui.dpi(getContext(), 7));
                 if (header) cell.setTypeface(Typeface.DEFAULT_BOLD);
                 row.addView(cell, new LinearLayout.LayoutParams(
-                        Math.round(colW[ci]), ViewGroup.LayoutParams.WRAP_CONTENT));
+                        Math.round(colW[ci]), ViewGroup.LayoutParams.MATCH_PARENT)); // 高度跟随行
             }
             addView(row, new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
