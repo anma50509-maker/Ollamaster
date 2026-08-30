@@ -16,6 +16,8 @@ import android.text.style.RelativeSizeSpan;
 import android.text.style.StrikethroughSpan;
 import android.text.style.StyleSpan;
 import android.view.View;
+import android.graphics.Canvas;
+import android.graphics.Paint;
 import android.view.ViewGroup;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
@@ -580,41 +582,170 @@ public class Markdown {
      * 单元格为 TextView，渲染嵌套 inline MD（加粗/链接/代码/斜体/高亮等），文字居中。
      * 上下滑动跟随消息列表本身。
      */
+    /** 构建真网格表格：整体 Canvas 绘制贯穿横竖线，列宽拉伸撑满容器，文字居中、单元格内嵌 MD */
+    /** 构建真网格表格：整体 Canvas 绘制贯穿横竖线，列宽拉伸撑满容器，文字居中、单元格内嵌 MD */
     public static View buildTableView(Context ctx, java.util.List<String> rows, Theme t) {
+        // 解析：跳过分隔行
+        java.util.List<java.util.List<String>> data = new java.util.ArrayList<>();
+        for (int ri = 0; ri < rows.size(); ri++) {
+            if (ri == 1) continue; // 分隔行
+            data.add(splitRow(rows.get(ri)));
+        }
+        if (data.isEmpty()) return new TextView(ctx);
+        final float dpr = ctx.getResources().getDisplayMetrics().density;
+        int ncol = 0;
+        for (java.util.List<String> r : data) ncol = Math.max(ncol, r.size());
+        if (ncol == 0) return new TextView(ctx);
+
+        TextPaint mtp = new TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+        mtp.setTextSize(Ui.spi(ctx, 12.5f));
+        float pad = 9 * dpr;
+
+        // 每列宽度 = 该列所有单元格纯文本的最大自然宽 + padding
+        float[] colW = new float[ncol];
+        for (java.util.List<String> r : data) {
+            for (int ci = 0; ci < r.size() && ci < ncol; ci++) {
+                float nat = 0;
+                for (String seg : plain(r.get(ci)).split("\\n", -1))
+                    nat = Math.max(nat, mtp.measureText(seg));
+                float w = nat + pad * 2;
+                if (w > colW[ci]) colW[ci] = w;
+            }
+        }
+        // 拉伸撑满：可用宽度 = 屏宽 - 外边距；若自然总宽不足则按列均分补足
+        float available = ctx.getResources().getDisplayMetrics().widthPixels - Ui.dpi(ctx, 76);
+        float total = 0;
+        for (float w : colW) total += w;
+        if (total < available && ncol > 0) {
+            float extra = available - total;
+            float addEach = extra / ncol;
+            for (int ci = 0; ci < ncol; ci++) colW[ci] += addEach;
+            total = available;
+        }
+
+        TableView tv = new TableView(ctx, colW, t, pad);
+        for (int ri = 0; ri < data.size(); ri++) {
+            java.util.List<CharSequence> cells = new java.util.ArrayList<>();
+            java.util.List<String> r = data.get(ri);
+            for (int ci = 0; ci < ncol; ci++) {
+                SpannableStringBuilder sb = new SpannableStringBuilder();
+                inline(sb, ci < r.size() ? r.get(ci) : "", t); // 嵌套 MD
+                cells.add(sb);
+            }
+            tv.addRow(cells, ri == 0);
+        }
+
         android.widget.HorizontalScrollView hsv = new android.widget.HorizontalScrollView(ctx);
         hsv.setHorizontalScrollBarEnabled(true);
         hsv.setVerticalScrollBarEnabled(false);
         hsv.setFillViewport(false);
-
-        LinearLayout table = new LinearLayout(ctx);
-        table.setOrientation(LinearLayout.VERTICAL);
-        int pad = Ui.dpi(ctx, 9);
-        float dpr = ctx.getResources().getDisplayMetrics().density;
-
-        for (int ri = 0; ri < rows.size(); ri++) {
-            if (ri == 1) continue; // 分隔行（仅用于对齐信息，此处统一居中）
-            java.util.List<String> cells = splitRow(rows.get(ri));
-            LinearLayout rowL = new LinearLayout(ctx);
-            rowL.setOrientation(LinearLayout.HORIZONTAL);
-            for (int ci = 0; ci < cells.size(); ci++) {
-                SpannableStringBuilder sb = new SpannableStringBuilder();
-                inline(sb, cells.get(ci), t); // 嵌套 MD 渲染
-                TextView cellTv = new TextView(ctx);
-                cellTv.setText(sb);
-                cellTv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, Ui.spi(ctx, 12.5f));
-                cellTv.setGravity(android.view.Gravity.CENTER);
-                cellTv.setPadding(pad, Ui.dpi(ctx, 6), pad, Ui.dpi(ctx, 6));
-                int bg = ri == 0 ? t.alpha(t.accent, 0.11f) : android.graphics.Color.TRANSPARENT;
-                cellTv.setBackground(Ui.stroke(bg, t.alpha(t.border, 1f), 1, Math.max(1, dpr * 0.7f)));
-                rowL.addView(cellTv, new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-            }
-            table.addView(rowL, new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        }
-        hsv.addView(table, new android.widget.HorizontalScrollView.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        android.widget.HorizontalScrollView.LayoutParams hlp =
+                new android.widget.HorizontalScrollView.LayoutParams(
+                        Math.round(total + 2 * pad), ViewGroup.LayoutParams.WRAP_CONTENT);
+        hsv.addView(tv, hlp);
         return hsv;
     }
 
+    /** 剥掉轻量 MD 标记，得到用于测量宽度的纯文本 */
+    /** 剥掉轻量 MD 标记，得到用于测量宽度的纯文本（手写扫描，避免正则转义问题） */
+    private static String plain(String s) {
+        if (s == null) return "";
+        String o = s.replace("**", "").replace("~~", "").replace("`", "")
+                .replace("==", "").replace("*", "");
+        // 去除 [..](..) 与 ![..](..)
+        StringBuilder sb = new StringBuilder();
+        int n = o.length();
+        for (int i = 0; i < n; i++) {
+            char c = o.charAt(i);
+            if (c == '!' && i + 1 < n && o.charAt(i + 1) == '[') {
+                int cl = o.indexOf(']', i);
+                if (cl >= 0 && cl + 1 < n && o.charAt(cl + 1) == '(') {
+                    int pe = o.indexOf(')', cl);
+                    if (pe >= 0) { i = pe; continue; }
+                }
+            }
+            if (c == '[') {
+                int cl = o.indexOf(']', i);
+                if (cl >= 0 && cl + 1 < n && o.charAt(cl + 1) == '(') {
+                    int pe = o.indexOf(')', cl);
+                    if (pe >= 0) { i = pe; continue; }
+                }
+            }
+            sb.append(c);
+        }
+        return sb.toString();
+    }
+
+
+    /** 真网格表格：整体绘制贯穿线条（非单元格各自描边），列宽由外部撑满 */
+    public static class TableView extends LinearLayout {
+        private final float[] colW;
+        private final Theme t;
+        private final float pad;
+        private final float lineW;
+
+        public TableView(Context ctx, float[] colWidths, Theme t, float padPx) {
+            super(ctx);
+            this.colW = colWidths;
+            this.t = t;
+            this.pad = padPx;
+            this.lineW = Math.max(1, ctx.getResources().getDisplayMetrics().density * 0.8f);
+            setOrientation(VERTICAL);
+            setWillNotDraw(false);
+            setPadding((int) pad, (int) pad, (int) pad, (int) pad);
+        }
+
+        public void addRow(java.util.List<CharSequence> cells, boolean header) {
+            LinearLayout row = new LinearLayout(getContext());
+            row.setOrientation(HORIZONTAL);
+            for (int ci = 0; ci < colW.length; ci++) {
+                CharSequence txt = ci < cells.size() ? cells.get(ci) : "";
+                TextView cell = new TextView(getContext());
+                cell.setText(txt);
+                cell.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, Ui.spi(getContext(), 12.5f));
+                cell.setGravity(android.view.Gravity.CENTER);
+                cell.setPadding(0, Ui.dpi(getContext(), 6), 0, Ui.dpi(getContext(), 6));
+                if (header) cell.setTypeface(Typeface.DEFAULT_BOLD);
+                row.addView(cell, new LinearLayout.LayoutParams(
+                        Math.round(colW[ci]), ViewGroup.LayoutParams.WRAP_CONTENT));
+            }
+            addView(row, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        }
+
+        @Override
+        protected void onDraw(android.graphics.Canvas canvas) {
+            super.onDraw(canvas);
+            int w = getWidth(), h = getHeight();
+            if (w <= 0 || h <= 0) return;
+            Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+            p.setStrokeWidth(lineW);
+            p.setColor(t.alpha(t.border, 1f));
+            p.setStyle(Paint.Style.STROKE);
+
+            // 表头整行背景
+            if (getChildCount() > 0) {
+                int headH = getChildAt(0).getHeight();
+                if (headH > 0) {
+                    Paint hb = new Paint();
+                    hb.setColor(t.alpha(t.accent, 0.11f));
+                    canvas.drawRect(0, 0, w, headH, hb);
+                }
+            }
+            // 垂直贯穿线（按列宽累计位置）
+            float x = 0;
+            for (int ci = 0; ci <= colW.length; ci++) {
+                canvas.drawLine(x, 0, x, h, p);
+                if (ci < colW.length) x += colW[ci];
+            }
+            // 水平贯穿线（每行底部）
+            float y = 0;
+            for (int ri = 0; ri < getChildCount(); ri++) {
+                y += getChildAt(ri).getHeight();
+                canvas.drawLine(0, y, w, y, p);
+            }
+            // 外框
+            canvas.drawRect(0, 0, w - lineW / 2, h - lineW / 2, p);
+        }
+    }
 }
