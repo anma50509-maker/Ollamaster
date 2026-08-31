@@ -41,6 +41,7 @@ public class SettingsPage extends Page {
         buildServerSection(root);
         buildThemeSection(root);
         buildChatSection(root);
+        buildTtsSection(root);
         buildCloudSection(root);
         buildWorkspaceSection(root);
         buildDataSection(root);
@@ -459,6 +460,72 @@ public class SettingsPage extends Page {
                 p.sysPrompt().length() > 30 ? p.sysPrompt().substring(0, 29) + "…" : p.sysPrompt(),
                 () -> inputDialog("全局系统提示词", "附加在所有人设之后的系统指令",
                         p.sysPrompt(), true, false, s -> p.sysPrompt(s)));
+    }
+
+    private void buildTtsSection(LinearLayout root) {
+        LinearLayout card = section(root, "语音合成 (TTS)");
+        final Prefs p = Prefs.get(act);
+
+        // 引擎模式切换
+        LinearLayout modeRow = baseRow(card);
+        rowTitle(modeRow, "引擎", "系统引擎（离线/零配置）或 HTTP API");
+        LinearLayout modeBox = new LinearLayout(act);
+        modeBox.setOrientation(LinearLayout.HORIZONTAL);
+        final LinearLayout btnSys = modeBtn("系统引擎", "离线即时", "system".equals(p.ttsMode()));
+        final LinearLayout btnHttp = modeBtn("HTTP API", "第三方合成", "http".equals(p.ttsMode()));
+        LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(0, Ui.dpi(act, 52), 1f);
+        mlp.rightMargin = Ui.dpi(act, 6);
+        modeBox.addView(btnSys, mlp);
+        modeBox.addView(btnHttp, new LinearLayout.LayoutParams(0, Ui.dpi(act, 52), 1f));
+        modeRow.addView(modeBox, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        btnSys.setOnClickListener(v -> {
+            p.ttsMode("system");
+            rebuild();
+        });
+        btnHttp.setOnClickListener(v -> {
+            p.ttsMode("http");
+            rebuild();
+        });
+        hair(card);
+
+        if ("http".equals(p.ttsMode())) {
+            rowClick(card, "接口地址", p.ttsUrl(), () ->
+                    inputDialog("接口地址", "OpenAI 兼容 /audio/speech 端点，如 https://api.openai.com/v1/audio/speech",
+                            p.ttsUrl(), false, false, s2 -> {
+                                if (!s2.trim().isEmpty()) p.ttsUrl(s2.trim());
+                            }));
+            hair(card);
+            rowClick(card, "API 密钥", p.ttsKey().isEmpty() ? "未配置" : "••••" +
+                            p.ttsKey().substring(Math.max(0, p.ttsKey().length() - 4)), () ->
+                    inputDialog("API 密钥", "仅保存在本机", p.ttsKey(), false, false, s2 -> p.ttsKey(s2.trim())));
+            hair(card);
+            rowClick(card, "模型", p.ttsModel(), () ->
+                    inputDialog("模型", "如 tts-1 / tts-1-hd 或兼容模型", p.ttsModel(), false, false, s2 -> {
+                        if (!s2.trim().isEmpty()) p.ttsModel(s2.trim());
+                    }));
+            hair(card);
+            rowClick(card, "声音", p.ttsVoice(), () ->
+                    inputDialog("声音", "如 alloy / echo / fable / onyx / nova / shimmer", p.ttsVoice(), false, false, s2 -> {
+                        if (!s2.trim().isEmpty()) p.ttsVoice(s2.trim());
+                    }));
+            hair(card);
+            sliderRow(card, "语速", 50, 200, Math.round(p.ttsSpeed() * 100), v -> v + "%", v -> p.ttsSpeed(v / 100f));
+            hair(card);
+            rowClick(card, "试听", "朗读一段测试文本验证配置", () -> {
+                TtsEngine.get(act).speak("你好，我是 Ollamaster。语音合成功能已就绪。");
+                Ui.toast(act, "正在朗读测试文本…");
+            });
+        } else {
+            rowClick(card, "试听", "朗读一段测试文本", () -> {
+                TtsEngine.get(act).speak("你好，我是 Ollamaster。系统语音引擎工作正常。");
+                Ui.toast(act, "正在朗读测试文本…");
+            });
+            hair(card);
+            rowClick(card, "停止朗读", "结束当前朗读", () -> {
+                TtsEngine.get(act).stop();
+                Ui.toast(act, "已停止");
+            });
+        }
     }
 
     private void buildCloudSection(LinearLayout root) {

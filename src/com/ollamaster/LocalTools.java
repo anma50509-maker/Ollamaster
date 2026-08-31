@@ -83,6 +83,10 @@ public class LocalTools {
                 new String[]{"id"}, new String[]{"要删除的记忆 id"}, new String[]{"id"}));
         out.put(fn2("mem_stats", "统计记忆库规模（总条数/分类抽屉数/分类树/最近更新时间）",
                 null, null, null));
+        out.put(fn2("tts_speak", "使用语音合成朗读文本（系统引擎或已配置的第三方 TTS API，中文英文均可）。返回朗读状态",
+                new String[]{"text"}, new String[]{"要朗读的文本内容"}, new String[]{"text"}));
+        out.put(fn2("tts_stop", "停止当前正在进行的语音朗读",
+                null, null, null));
         } catch (Exception ignored) {}
         return out;
     }
@@ -163,6 +167,7 @@ public class LocalTools {
             case "list_plugins": case "enable_plugin": case "disable_plugin":
             case "mem_list": case "mem_read": case "mem_search":
             case "mem_write": case "mem_update": case "mem_delete": case "mem_stats":
+            case "tts_speak": case "tts_stop":
                 return true;
             default:
                 return false;
@@ -199,10 +204,18 @@ public class LocalTools {
             case "mem_update": return MemoryStore.update(args);
             case "mem_delete": return MemoryStore.remove(args.getString("id"));
             case "mem_stats": return MemoryStore.statsText();
+            case "tts_speak": return ttsSpeak(args.optString("text", ""));
+            case "tts_stop": { TtsEngine.get(App.inst).stop(); return "已停止朗读"; }
             default: throw new Exception("未知工具: " + name);
         }
     }
 
+
+    private static String ttsSpeak(String text) {
+        if (text == null || text.trim().isEmpty()) return "无内容可朗读";
+        TtsEngine.get(App.inst).speak(text.trim());
+        return "正在朗读：" + (text.trim().length() > 60 ? text.trim().substring(0, 60) + "…" : text.trim());
+    }
     private static File resolve(String p) throws Exception {
         Prefs pref = Prefs.get(App.inst);
         File ws = new File(pref.workspace());

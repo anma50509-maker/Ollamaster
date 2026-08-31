@@ -1831,7 +1831,20 @@ public class ChatPage extends Page {
         box.setOrientation(LinearLayout.VERTICAL);
         box.addView(Ui.title(act, t, "消息操作"));
         box.addView(Ui.gap(act, 8));
+        final Dialog[] d = new Dialog[1];
         addMenuItem(box, "复制全文", () -> Ui.copy(act, m.content));
+        addMenuItem(box, "🔊 朗读此消息", () -> {
+            if (m.content == null || m.content.trim().isEmpty()) {
+                Ui.toast(act, "该消息无内容可朗读");
+                return;
+            }
+            TtsEngine.get(act).speak(m.content);
+            d[0].dismiss();
+        });
+        addMenuItem(box, "⏹ 停止朗读", () -> {
+            TtsEngine.get(act).stop();
+            d[0].dismiss();
+        });
         if (allowRegen) addMenuItem(box, "重新生成本回复", this::regenerate);
         addMenuItem(box, "删除该消息", () -> {
             if (streaming) return;
@@ -1840,8 +1853,8 @@ public class ChatPage extends Page {
             refreshViews();
             refreshEmpty();
         });
-        Dialog d = Ui.center(act, box, t);
-        d.show();
+        d[0] = Ui.center(act, box, t);
+        d[0].show();
     }
 
     private void addMenuItem(LinearLayout box, String label, Runnable r) {

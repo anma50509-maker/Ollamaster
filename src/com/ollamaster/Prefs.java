@@ -103,6 +103,25 @@ public class Prefs {
 
     public String activeCloudModel() { return sp.getString("activeCloudModel", ""); }
     public void activeCloudModel(String v) { sp.edit().putString("activeCloudModel", v).apply(); }
+    // ===== 语音合成（TTS）配置 =====
+    public String ttsMode() { return sp.getString("ttsMode", "system"); } // system | http
+    public void ttsMode(String v) { sp.edit().putString("ttsMode", v).apply(); }
+
+    public String ttsUrl() { return sp.getString("ttsUrl", "https://api.openai.com/v1/audio/speech"); }
+    public void ttsUrl(String v) { sp.edit().putString("ttsUrl", v).apply(); }
+
+    public String ttsKey() { return sp.getString("ttsKey", ""); }
+    public void ttsKey(String v) { sp.edit().putString("ttsKey", v).apply(); }
+
+    public String ttsModel() { return sp.getString("ttsModel", "tts-1"); }
+    public void ttsModel(String v) { sp.edit().putString("ttsModel", v).apply(); }
+
+    public String ttsVoice() { return sp.getString("ttsVoice", "alloy"); }
+    public void ttsVoice(String v) { sp.edit().putString("ttsVoice", v).apply(); }
+
+    public float ttsSpeed() { return sp.getFloat("ttsSpeed", 1.0f); }
+    public void ttsSpeed(float v) { sp.edit().putFloat("ttsSpeed", v).apply(); }
+
 
     public int activeKeyIndex() { return sp.getInt("activeKeyIndex", 0); }
     public void activeKeyIndex(int v) { sp.edit().putInt("activeKeyIndex", v).apply(); }
