@@ -292,6 +292,12 @@ public class MainActivity extends Activity {
     public String currentTab() { return current; }
 
     public void switchTo(String key) {
+        // 视图操作必须发生在主线程：后台线程（如浏览器自动化工具）调用时转发到 UI 线程
+        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
+            final String k = key;
+            runOnUiThread(() -> switchTo(k));
+            return;
+        }
         Page p = pages.get(key);
         if (p == null) return;
         if (!current.isEmpty()) {
@@ -302,6 +308,9 @@ public class MainActivity extends Activity {
         container.removeAllViews();
         try {
             View r = p.ensure();
+            // 防御：若该页面根视图意外仍挂在旧父容器（竞态/重复切换），先摘除再挂载
+            android.view.ViewParent rp = r.getParent();
+            if (rp instanceof ViewGroup) ((ViewGroup) rp).removeView(r);
             container.addView(r, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
             refreshNav();

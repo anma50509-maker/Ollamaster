@@ -213,9 +213,13 @@ public class WebPage extends Page {
         try { web.evaluateJavascript(js, null); } catch (Exception ignored) {}
     }
 
-    /** 切换到浏览器页使其可见（截图与用户观察需要） */
+    /** 切换到浏览器页使其可见（截图与用户观察需要）；强制在主线程执行，避免与 UI 操作竞态 */
     public void focus() {
-        try { if (!"web".equals(act.currentTab())) act.switchTo("web"); } catch (Exception ignored) {}
+        try {
+            act.runOnUiThread(() -> {
+                try { if (!"web".equals(act.currentTab())) act.switchTo("web"); } catch (Exception ignored) {}
+            });
+        } catch (Exception ignored) {}
     }
 
     /** 当前 URL（同步） */
