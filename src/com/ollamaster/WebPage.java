@@ -19,6 +19,8 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.EditText;
+import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
@@ -100,12 +102,13 @@ public class WebPage extends Page {
                 this::goHome
         };
         for (int i = 0; i < icons.length; i++) {
-            TextView b = new TextView(act);
+            FrameLayout b = new FrameLayout(act);
             final int idx = i;
-            b.setText("");
-            b.setTextColor(t.textSec);
-            Icon.pinCenter(b, icons[i], 17);
-            b.setGravity(Gravity.CENTER);
+            ImageView bi = new ImageView(act);
+            bi.setImageDrawable(Icon.v(act, icons[i], t.textSec, 17));
+            bi.setScaleType(ImageView.ScaleType.CENTER);
+            b.addView(bi, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.CENTER));
             b.setBackground(Ui.ripple(Ui.round(Color.TRANSPARENT, Ui.dpi(act, 10)), t.alpha(t.textPri, 0.12f)));
             b.setOnClickListener(v -> acts[idx].run());
             controls.addView(b, new LinearLayout.LayoutParams(0, Ui.dpi(act, 34), 1f));

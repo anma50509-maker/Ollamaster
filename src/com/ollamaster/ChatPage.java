@@ -47,9 +47,10 @@ public class ChatPage extends Page {
     private MsgAdapter msgAdapter;
     private LinearLayout emptyBox;
     private EditText input;
-    private TextView sendBtn, modelChip, personaChip, sysChip;
+    private FrameLayout sendBtn;
+    private TextView modelChip, personaChip, sysChip;
     private TextView autoTtsBtn;
-    private TextView attachBtn;
+    private ImageView attachBtn;
     private LinearLayout attachRow;
     private ImageView emptyAvatar;
     private Personas.P avatarTarget;
@@ -359,11 +360,9 @@ public class ChatPage extends Page {
         inner.setBackground(Ui.stroke(t.surfaceAlt, t.border, Ui.dpi(act, 26), Ui.dpi(act, 0.7f)));
         inner.setPadding(Ui.dpi(act, 10), Ui.dpi(act, 5), Ui.dpi(act, 6), Ui.dpi(act, 5));
 
-        attachBtn = new TextView(act);
-        attachBtn.setGravity(Gravity.CENTER);
-        attachBtn.setText("＋");
-        attachBtn.setTextColor(t.textSec);
-        attachBtn.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 17));
+        attachBtn = new ImageView(act);
+        attachBtn.setImageDrawable(Icon.v(act, "plus", t.textSec, 19));
+        attachBtn.setScaleType(ImageView.ScaleType.CENTER);
         attachBtn.setBackground(Ui.ripple(
                 Ui.round(Color.TRANSPARENT, Ui.dpi(act, 999)), t.alpha(t.textPri, 0.15f)));
         attachBtn.setOnClickListener(v -> pickFiles());
@@ -382,13 +381,16 @@ public class ChatPage extends Page {
         input.setImeOptions(android.view.inputmethod.EditorInfo.IME_FLAG_NO_ENTER_ACTION);
         inner.addView(input, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-        sendBtn = new TextView(act);
-        sendBtn.setGravity(Gravity.CENTER);
-        sendBtn.setText("");
-        sendBtn.setTextColor(t.mixTextOn(t));
-        Icon.pinCenter(sendBtn, "send", 20);
+        sendBtn = new FrameLayout(act);
         sendBtn.setBackground(Ui.ripple(Ui.round(t.accent, Ui.dpi(act, 999)), t.alpha(t.textPri, 0.3f)));
         sendBtn.setOnClickListener(v -> onSendTap());
+        sendBtn.setClickable(true);
+        sendBtn.setFocusable(true);
+        ImageView sIcon = new ImageView(act);
+        sIcon.setImageDrawable(Icon.v(act, "send", t.mixTextOn(t), 20));
+        sIcon.setScaleType(ImageView.ScaleType.CENTER);
+        sendBtn.addView(sIcon, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.CENTER));
         LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(Ui.dpi(act, 40), Ui.dpi(act, 40));
         blp.leftMargin = Ui.dpi(act, 8);
         inner.addView(sendBtn, blp);
@@ -1666,15 +1668,16 @@ public class ChatPage extends Page {
 
     private void busyUi(boolean b) {
         holdAwake(b);
-        if (b) {
-            sendBtn.setText("");
-            Icon.pinCenter(sendBtn, "stop", 18);
-            sendBtn.setBackground(Ui.round(t.alpha(t.danger, 0.9f), Ui.dpi(act, 999)));
-        } else {
-            sendBtn.setText("");
-            Icon.pinCenter(sendBtn, "send", 20);
-            sendBtn.setBackground(Ui.round(t.accent, Ui.dpi(act, 999)));
-        }
+        updateSendIcon(b);
+    }
+
+    /** 发送按钮状态：圆形背景 + 居中矢量图标（帧布局 + CENTER 缩放，彻底避免基线偏移） */
+    private void updateSendIcon(boolean busy) {
+        if (sendBtn == null) return;
+        ImageView ic = sendBtn.getChildCount() > 0 ? (ImageView) sendBtn.getChildAt(0) : null;
+        if (ic != null) ic.setImageDrawable(Icon.v(act, busy ? "stop" : "send", t.mixTextOn(t), busy ? 18 : 20));
+        GradientDrawable bg = Ui.round(busy ? t.alpha(t.danger, 0.9f) : t.accent, Ui.dpi(act, 999));
+        sendBtn.setBackground(Ui.ripple(bg, t.alpha(t.textPri, 0.3f)));
     }
 
 

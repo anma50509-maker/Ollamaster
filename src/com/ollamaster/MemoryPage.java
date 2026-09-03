@@ -8,6 +8,8 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.EditText;
+import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -206,10 +208,12 @@ public class MemoryPage extends Page {
         topRow.setOrientation(LinearLayout.HORIZONTAL);
         topRow.setGravity(Gravity.CENTER_VERTICAL);
 
-        TextView arrow = new TextView(act);
-        arrow.setText("");
-        arrow.setTextColor(t.accent);
-        Icon.pinCenter(arrow, "chevronRight", 13);
+        FrameLayout arrow = new FrameLayout(act);
+        ImageView arrowImg = new ImageView(act);
+        arrowImg.setImageDrawable(Icon.v(act, "chevronRight", t.accent, 13));
+        arrowImg.setScaleType(ImageView.ScaleType.CENTER);
+        arrow.addView(arrowImg, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.CENTER));
         LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(Ui.dpi(act, 22), ViewGroup.LayoutParams.WRAP_CONTENT);
         topRow.addView(arrow, alp);
 

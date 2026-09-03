@@ -14,6 +14,7 @@ import android.view.ViewGroup;
 import android.widget.BaseAdapter;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
@@ -233,9 +234,11 @@ public class WorkPage extends Page {
             final File f = cachedFiles.get(i);
             LinearLayout row = cv instanceof LinearLayout ? (LinearLayout) cv : Ui.row(act, t);
             if (row.getChildCount() == 0) {
-                TextView icon = new TextView(act);
-                icon.setGravity(Gravity.CENTER);
-                icon.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 14));
+                FrameLayout icon = new FrameLayout(act);
+                ImageView iconImg = new ImageView(act);
+                iconImg.setScaleType(ImageView.ScaleType.CENTER);
+                icon.addView(iconImg, new FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.CENTER));
                 LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(Ui.dpi(act, 30), Ui.dpi(act, 34));
                 ilp.rightMargin = Ui.dpi(act, 10);
                 row.addView(icon, ilp);
@@ -245,11 +248,12 @@ public class WorkPage extends Page {
                 row.addView(col);
             }
             boolean dir = f.isDirectory();
-            TextView icon = (TextView) row.getChildAt(0);
-            icon.setText("");
-            icon.setTextColor(dir ? t.accent : t.alpha(t.textSec, 0.8f));
-            icon.setGravity(Gravity.CENTER);
-            Icon.pinCenter(icon, dir ? "folder" : "file", 15);
+            FrameLayout icon = (FrameLayout) row.getChildAt(0);
+            ImageView iconImg = icon.getChildCount() > 0 ? (ImageView) icon.getChildAt(0) : null;
+            if (iconImg != null) {
+                iconImg.setImageDrawable(Icon.v(act, dir ? "folder" : "file",
+                        dir ? t.accent : t.alpha(t.textSec, 0.8f), 15));
+            }
             icon.setBackground(Ui.round(t.alpha(dir ? t.accent : t.textPri, 0.07f), Ui.dpi(act, 9)));
             LinearLayout col = (LinearLayout) row.getChildAt(1);
             while (col.getChildCount() < 2) {
