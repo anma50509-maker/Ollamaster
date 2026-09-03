@@ -95,6 +95,38 @@ public class LocalTools {
                 new String[]{"key", "value"},
                 new String[]{"设置键名（见描述）", "设置值：布尔用 true/false，数字用数值，字符串直接填写"},
                 new String[]{"key", "value"}));
+        out.put(fn2("browser_open", "在应用内浏览器打开网页并等待加载完成（自动切换到浏览器页），返回标题",
+                new String[]{"url", "waitMs"},
+                new String[]{"网址（自动补全 https://）", "等待加载毫秒数，默认8000"},
+                new String[]{"url"}));
+        out.put(fn2("browser_status", "查看浏览器当前页面 URL 与标题",
+                new String[]{}, new String[]{}, null));
+        out.put(fn2("browser_extract", "提取浏览器当前页面可见文本（自动去标签压缩空白）",
+                new String[]{"maxChars"}, new String[]{"最多返回字符数，默认2500"}, null));
+        out.put(fn2("browser_click", "模拟鼠标点击页面元素：selector(CSS选择器) 或 x/y 坐标；自动滚动到元素并派发 mousedown/mouseup/click",
+                new String[]{"selector", "x", "y"},
+                new String[]{"CSS 选择器（与坐标二选一）", "点击 X 坐标", "点击 Y 坐标"},
+                null));
+        out.put(fn2("browser_type", "模拟键盘在输入框输入文本（自动 focus 并触发 input/change 事件）",
+                new String[]{"selector", "text"},
+                new String[]{"输入框 CSS 选择器", "要输入的文本"},
+                new String[]{"selector", "text"}));
+        out.put(fn2("browser_scroll", "滚动页面：direction=top/bottom/up/down/left/right；px 为步长（默认480）",
+                new String[]{"direction", "px"},
+                new String[]{"滚动方向", "滚动像素（配合 up/down/left/right）"},
+                null));
+        out.put(fn2("browser_back", "浏览器后退一页",
+                new String[]{}, new String[]{}, null));
+        out.put(fn2("browser_eval", "在浏览器当前页面执行任意 JavaScript 并返回结果",
+                new String[]{"js"}, new String[]{"要执行的 JS 代码"}, new String[]{"js"}));
+        out.put(fn2("browser_screenshot", "截取浏览器当前画面保存为 PNG（工作区 browsershots/），返回文件路径；可用 web_vision 分析",
+                new String[]{"path"}, new String[]{"可选：保存文件名（默认自动时间戳）"}, null));
+        out.put(fn2("browser_ua", "设置浏览器 User-Agent（反爬虫对抗；默认已伪装真实 Chrome 移动端 UA）",
+                new String[]{"ua"}, new String[]{"自定义 UA 字符串"}, null));
+        out.put(fn2("web_vision", "把截图/图片交给视觉模型理解（本地 Ollama 视觉模型或云端视觉接口），返回描述与关键元素建议坐标",
+                new String[]{"path", "question"},
+                new String[]{"图片文件路径（browser_screenshot 的输出）", "要问的问题（可要求给出可点击元素坐标）"},
+                new String[]{"path"}));
         } catch (Exception ignored) {}
         return out;
     }
@@ -177,6 +209,10 @@ public class LocalTools {
             case "mem_write": case "mem_update": case "mem_delete": case "mem_stats":
             case "tts_speak": case "tts_stop":
             case "list_settings": case "get_setting": case "set_setting":
+            case "browser_open": case "browser_status": case "browser_extract":
+            case "browser_click": case "browser_type": case "browser_scroll":
+            case "browser_back": case "browser_eval": case "browser_screenshot":
+            case "browser_ua": case "web_vision":
                 return true;
             default:
                 return false;
@@ -218,6 +254,17 @@ public class LocalTools {
             case "list_settings": return listSettings();
             case "get_setting": return getSetting(args.getString("key"));
             case "set_setting": return setSetting(args.getString("key"), args.optString("value", ""));
+            case "browser_open": return browserOpen(args);
+            case "browser_status": return browserStatus();
+            case "browser_extract": return browserExtract(args);
+            case "browser_click": return browserClick(args);
+            case "browser_type": return browserType(args);
+            case "browser_scroll": return browserScroll(args);
+            case "browser_back": return browserBack();
+            case "browser_eval": return browserEval(args);
+            case "browser_screenshot": return browserScreenshot(args);
+            case "browser_ua": return browserUa(args);
+            case "web_vision": return webVision(args);
             default: throw new Exception("未知工具: " + name);
         }
     }
@@ -705,5 +752,229 @@ public class LocalTools {
             if (a != null) a.onPageParamChanged();
         });
         return "已禁用插件「" + id + "」，其所有功能已暂停";
+    }
+
+    // ============================ 浏览器自动化 + 视觉理解 ============================
+
+    private static WebPage webPage() {
+        MainActivity act = MainActivity.instance();
+        return act == null ? null : act.webPage();
+    }
+
+    private static String jsStr(String raw) {
+        if (raw == null) return "";
+        String t = raw.trim();
+        if (t.isEmpty() || "null".equals(t)) return "";
+        try { return new JSONObject("{\"v\":" + t + "}").optString("v"); } catch (Exception e) { return t; }
+    }
+
+    private static String trunc(String s, int n) {
+        if (s == null) return "";
+        return s.length() > n ? s.substring(0, n) + "…" : s;
+    }
+
+    private static String browserOpen(JSONObject a) throws Exception {
+        WebPage wp = webPage();
+        if (wp == null) return "错误：浏览器不可用（请确认已初始化浏览器）";
+        String url = a.optString("url", "").trim();
+        if (url.isEmpty()) throw new Exception("缺少 url 参数");
+        if (!url.startsWith("http://") && !url.startsWith("https://")) url = "https://" + url;
+        wp.focus();
+        int wait = a.optInt("waitMs", 8000);
+        boolean done = wp.openWait(url, wait);
+        StringBuilder out = new StringBuilder("已打开 " + url + (done ? "（加载完成）" : "（仍在加载，可用 browser_status 查看）"));
+        String title = jsStr(wp.evalJs("document.title", 1500));
+        if (!title.isEmpty()) out.append("\n标题：").append(title);
+        return out.toString();
+    }
+
+    private static String browserStatus() {
+        WebPage wp = webPage();
+        if (wp == null) return "错误：浏览器不可用";
+        String url = wp.pageUrl();
+        String title = jsStr(wp.evalJs("document.title", 1500));
+        return "当前页面：" + (url.isEmpty() ? "（未加载或主页）" : url) + (title.isEmpty() ? "" : "\n标题：" + title);
+    }
+
+    private static String browserExtract(JSONObject a) {
+        WebPage wp = webPage();
+        if (wp == null) return "错误：浏览器不可用";
+        int max = Math.min(6000, Math.max(200, a.optInt("maxChars", 2500)));
+        String js = "(function(){var b=document.body;if(!b)return '';var t=b.innerText||'';"
+                + "t=t.replace(/\\s+/g,' ').trim();return t.substring(0," + max + ");})()";
+        String r = jsStr(wp.evalJs(js, 2500));
+        return "页面文本（" + r.length() + " 字符）：\n" + r;
+    }
+
+    private static String browserClick(JSONObject a) throws Exception {
+        WebPage wp = webPage();
+        if (wp == null) return "错误：浏览器不可用";
+        String sel = a.optString("selector", "").trim();
+        int x = a.optInt("x", -1), y = a.optInt("y", -1);
+        String js;
+        if (!sel.isEmpty()) {
+            String q = JSONObject.quote(sel);
+            js = "(function(){var e=document.querySelector(" + q + ");if(!e)return 'NOT_FOUND';"
+                    + "e.scrollIntoView({block:'center'});"
+                    + "var r=e.getBoundingClientRect();var cx=r.left+r.width/2,cy=r.top+r.height/2;"
+                    + "var n=document.elementFromPoint(cx,cy)||e;"
+                    + "['mousedown','mouseup','click'].forEach(function(t){n.dispatchEvent(new MouseEvent(t,{bubbles:true,cancelable:true,view:window,clientX:cx,clientY:cy,button:0}));});"
+                    + "return 'OK';})()";
+        } else if (x >= 0 && y >= 0) {
+            js = "(function(){var cx=" + x + ",cy=" + y + ";"
+                    + "var n=document.elementFromPoint(cx,cy);if(!n)return 'NOT_FOUND';"
+                    + "['mousedown','mouseup','click'].forEach(function(t){n.dispatchEvent(new MouseEvent(t,{bubbles:true,cancelable:true,view:window,clientX:cx,clientY:cy,button:0}));});"
+                    + "return 'OK';})()";
+        } else {
+            throw new Exception("需提供 selector 或 x/y 坐标");
+        }
+        String r = jsStr(wp.evalJs(js, 2500));
+        return "点击 " + (sel.isEmpty() ? "(" + x + "," + y + ")" : sel) + " → " + (r.isEmpty() ? "OK" : r);
+    }
+
+    private static String browserType(JSONObject a) throws Exception {
+        WebPage wp = webPage();
+        if (wp == null) return "错误：浏览器不可用";
+        String sel = a.optString("selector", "").trim();
+        if (sel.isEmpty()) throw new Exception("缺少 selector");
+        String text = a.optString("text", "");
+        String q = JSONObject.quote(sel), t = JSONObject.quote(text);
+        String js = "(function(){var e=document.querySelector(" + q + ");if(!e)return 'NOT_FOUND';"
+                + "e.focus();"
+                + "var de=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value');"
+                + "if(de&&de.set){de.set.call(e," + t + ");}else{e.value=" + t + ";}"
+                + "e.dispatchEvent(new Event('input',{bubbles:true}));"
+                + "e.dispatchEvent(new Event('change',{bubbles:true}));"
+                + "return 'OK';})()";
+        String r = jsStr(wp.evalJs(js, 2500));
+        return "填写 " + sel + " → " + (r.isEmpty() ? "OK" : r);
+    }
+
+    private static String browserScroll(JSONObject a) {
+        WebPage wp = webPage();
+        if (wp == null) return "错误：浏览器不可用";
+        String dir = a.optString("direction", "down").toLowerCase(java.util.Locale.US);
+        int amount = Math.max(60, Math.abs(a.optInt("px", 480)));
+        String fjs;
+        if ("top".equals(dir)) fjs = "window.scrollTo(0,0);'top'";
+        else if ("bottom".equals(dir)) fjs = "window.scrollTo(0,document.body.scrollHeight);'bottom'";
+        else if ("up".equals(dir)) fjs = "window.scrollBy(0,-" + amount + ");'up'";
+        else if ("left".equals(dir)) fjs = "window.scrollBy(-" + amount + ",0);'left'";
+        else if ("right".equals(dir)) fjs = "window.scrollBy(" + amount + ",0);'right'";
+        else fjs = "window.scrollBy(0," + amount + ");'down'";
+        String r = jsStr(wp.evalJs(fjs, 2000));
+        return "已滚动 " + dir + (r.isEmpty() ? "" : " → " + r);
+    }
+
+    private static String browserBack() {
+        WebPage wp = webPage();
+        if (wp == null) return "错误：浏览器不可用";
+        return wp.goBackAuto() ? "已后退" : "没有可后退的历史页面";
+    }
+
+    private static String browserEval(JSONObject a) throws Exception {
+        WebPage wp = webPage();
+        if (wp == null) return "错误：浏览器不可用";
+        String js = a.optString("js", "").trim();
+        if (js.isEmpty()) throw new Exception("缺少 js");
+        String r = wp.evalJs(js, 3000);
+        return "JS 返回值：" + (r == null ? "（执行超时）" : r);
+    }
+
+    private static String browserScreenshot(JSONObject a) throws Exception {
+        WebPage wp = webPage();
+        MainActivity act = MainActivity.instance();
+        if (wp == null || act == null) return "错误：浏览器不可用";
+        wp.focus();
+        try { Thread.sleep(700); } catch (InterruptedException ignored) {}
+        android.graphics.Bitmap bmp = wp.screenshot();
+        if (bmp == null) return "截图失败（请确保浏览器页处于可见状态）";
+        String rel = a.optString("path", "").trim();
+        if (rel.contains("/") || rel.contains("\\")) throw new Exception("path 仅允许文件名");
+        String ws = Prefs.get(act).workspace();
+        java.io.File dir = new java.io.File(ws.isEmpty() ? act.getFilesDir().getAbsolutePath() : ws, "browsershots");
+        dir.mkdirs();
+        java.io.File f = new java.io.File(dir, rel.isEmpty()
+                ? "auto_" + new java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(new java.util.Date()) + ".png"
+                : rel);
+        java.io.FileOutputStream fo = new java.io.FileOutputStream(f);
+        bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 90, fo);
+        fo.close();
+        return "已保存截图：" + f.getAbsolutePath() + "（" + bmp.getWidth() + "×" + bmp.getHeight() + "）。"
+                + "如需理解画面，用 web_vision(path=该文件, question=你想问的问题)";
+    }
+
+    private static String browserUa(JSONObject a) {
+        WebPage wp = webPage();
+        if (wp == null) return "错误：浏览器不可用";
+        String ua = a.optString("ua", "").trim();
+        if (ua.isEmpty()) {
+            ua = "Mozilla/5.0 (Linux; Android 14; Pixel 7; 1080x2400) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36";
+        }
+        wp.setUa(ua);
+        return "User-Agent 已设置（对后续新加载的页面生效）";
+    }
+
+    /** 视觉问答：把截图交给支持视觉的模型理解（云端 OpenAI 兼容 image_url / 本地 Ollama images） */
+    private static String webVision(JSONObject a) throws Exception {
+        MainActivity act = MainActivity.instance();
+        if (act == null) return "错误：应用未就绪";
+        String path = a.optString("path", "").trim();
+        String q = a.optString("question", "请描述这张截图的主要内容，并给出关键可点击元素的坐标建议");
+        java.io.File f = new java.io.File(path);
+        if (!f.exists()) return "错误：图片不存在（" + path + "），请先用 browser_screenshot 截图";
+        String b64;
+        {
+            java.io.InputStream in = new java.io.FileInputStream(f);
+            byte[] buf = new byte[(int) Math.min(f.length(), 20L * 1024 * 1024)];
+            int n = 0;
+            while (n < buf.length) {
+                int r = in.read(buf, n, buf.length - n);
+                if (r < 0) break;
+                n += r;
+            }
+            in.close();
+            b64 = android.util.Base64.encodeToString(
+                    n == buf.length ? buf : java.util.Arrays.copyOf(buf, n), android.util.Base64.NO_WRAP);
+        }
+        Prefs p = Prefs.get(act);
+        String model = p.cloudMode()
+                ? (p.activeCloudModel().isEmpty() ? p.cloudModels().split("[,，]")[0].trim() : p.activeCloudModel())
+                : (p.activeModel().isEmpty() ? "llava" : p.activeModel());
+        int timeout = Math.max(p.timeoutSec(), 30) * 1000;
+        if (p.cloudMode()) {
+            JSONObject body = new JSONObject();
+            body.put("model", model);
+            body.put("stream", false);
+            body.put("max_tokens", 512);
+            JSONObject c1 = new JSONObject(); c1.put("type", "text"); c1.put("text", q);
+            JSONObject c2 = new JSONObject(); c2.put("type", "image_url");
+            JSONObject iu = new JSONObject(); iu.put("url", "data:image/png;base64," + b64);
+            c2.put("image_url", iu);
+            JSONObject um = new JSONObject(); um.put("role", "user");
+            um.put("content", new JSONArray().put(c1).put(c2));
+            body.put("messages", new JSONArray().put(um));
+            java.util.Map<String, String> hdr = new java.util.HashMap<>();
+            String key = p.cloudKey();
+            if (key != null && !key.isEmpty()) hdr.put("Authorization", "Bearer " + key);
+            Http.Resp r = Http.post(Cloud.url(p.cloudUrl(), "/chat/completions"), body.toString(), hdr, timeout);
+            if (r.code != 200) return "视觉请求失败(" + r.code + ")：" + trunc(r.body, 300);
+            JSONObject j = new JSONObject(r.body);
+            JSONObject ch = j.optJSONArray("choices").optJSONObject(0);
+            JSONObject mm = ch == null ? null : ch.optJSONObject("message");
+            return "视觉理解：\n" + (mm == null ? trunc(r.body, 600) : mm.optString("content", "（无内容）"));
+        } else {
+            ConvStore.Msg um = new ConvStore.Msg("user", q);
+            um.attaches = new java.util.ArrayList<>();
+            um.attaches.add(f.getAbsolutePath());
+            java.util.List<ConvStore.Msg> msgs = new java.util.ArrayList<>();
+            msgs.add(um);
+            String body = Ollama.buildChatBody(model, msgs, false, null, p);
+            Http.Resp r = Http.post(Ollama.base(p.host(), p.port()) + "/api/chat", body, null, timeout);
+            if (r.code != 200) return "视觉请求失败(" + r.code + ")：" + trunc(r.body, 300);
+            JSONObject j = new JSONObject(r.body);
+            JSONObject mm = j.optJSONObject("message");
+            return "视觉理解：\n" + (mm == null ? trunc(r.body, 600) : mm.optString("content", "（无内容）"));
+        }
     }
 }

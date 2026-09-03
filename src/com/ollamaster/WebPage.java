@@ -6,9 +6,14 @@ import android.content.Context;
 import android.graphics.Typeface;
 import android.view.View;
 import android.content.Intent;
+import android.graphics.Bitmap;
 import android.graphics.Color;
+import android.graphics.Rect;
 import android.net.Uri;
 import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
+import android.view.PixelCopy;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.ViewGroup;
@@ -135,6 +140,7 @@ public class WebPage extends Page {
         s.setMixedContentMode(android.webkit.WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
         s.setLoadWithOverviewMode(true);
         s.setUseWideViewPort(true);
+        applyAntiBot(s);
         web.setBackgroundColor(t.bg);
         web.setWebViewClient(new WebViewClient() {
             @Override
@@ -144,6 +150,10 @@ public class WebPage extends Page {
                     act.startActivity(new IntentShim().parse(url));
                 } catch (Exception ignored) {}
                 return true;
+            }
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                injectArmor();
             }
         });
         web.setWebChromeClient(new WebChromeClient() {
@@ -174,6 +184,114 @@ public class WebPage extends Page {
                 }
             }
         });
+    }
+
+    // ==================== 浏览器自动化（Agent 工具调用）+ 反爬虫 ====================
+
+    /** 反爬虫指纹：伪装真实 Chrome 移动端 UA、关闭弹窗自动化特征、会话持久化 */
+    private void applyAntiBot(WebSettings s) {
+        try {
+            s.setSupportMultipleWindows(false);
+            s.setJavaScriptCanOpenWindowsAutomatically(false);
+            // 伪装成真实 Chrome 移动端 UA，避免被识别为自动化环境
+            s.setUserAgentString("Mozilla/5.0 (Linux; Android 14; Pixel 7; 1080x2400) "
+                    + "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    + "Chrome/126.0.0.0 Mobile Safari/537.36");
+        } catch (Exception ignored) {}
+    }
+
+    /** 页面加载后注入反指纹脚本：抹除自动化痕迹、补齐常见浏览器指纹 */
+    private void injectArmor() {
+        String js = "(function(){try{"
+                + "Object.defineProperty(navigator,'webdriver',{get:function(){return undefined;}});"
+                + "Object.defineProperty(navigator,'languages',{get:function(){return ['zh-CN','zh','en-US','en'];}});"
+                + "if(!navigator.plugins||navigator.plugins.length===0){"
+                + "try{Object.defineProperty(navigator,'plugins',{get:function(){return [1,2,3,4,5];}});}catch(e2){}"
+                + "}"
+                + "if(!window.chrome){try{window.chrome={runtime:{}};}catch(e3){}}"
+                + "}catch(e){}; true})();";
+        try { web.evaluateJavascript(js, null); } catch (Exception ignored) {}
+    }
+
+    /** 切换到浏览器页使其可见（截图与用户观察需要） */
+    public void focus() {
+        try { if (!"web".equals(act.currentTab())) act.switchTo("web"); } catch (Exception ignored) {}
+    }
+
+    /** 当前 URL（同步） */
+    public String pageUrl() {
+        final Object[] out = {""};
+        final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+        act.runOnUiThread(() -> { try { if (web != null && web.getUrl() != null) out[0] = web.getUrl(); } catch (Exception ignored) {} latch.countDown(); });
+        try { latch.await(1200, java.util.concurrent.TimeUnit.MILLISECONDS); } catch (InterruptedException ignored) {}
+        return String.valueOf(out[0]);
+    }
+
+    /** 同步执行 JS，返回 evaluateJavascript 原始 JSON 值；超时返回 null */
+    public String evalJs(final String js, final int timeoutMs) {
+        final Object[] out = {null};
+        final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+        act.runOnUiThread(() -> {
+            try {
+                if (web == null) { latch.countDown(); return; }
+                web.evaluateJavascript(js, v -> { out[0] = v; latch.countDown(); });
+            } catch (Exception e) { latch.countDown(); }
+        });
+        try { latch.await(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS); } catch (InterruptedException ignored) {}
+        return out[0] == null ? null : String.valueOf(out[0]);
+    }
+
+    /** 打开 URL 并等待加载完成（≤waitMs），返回是否完成 */
+    public boolean openWait(final String url, final int waitMs) {
+        try { act.runOnUiThread(() -> { try { if (web != null) web.loadUrl(url); } catch (Exception ignored) {} }); } catch (Exception ignored) { return false; }
+        long end = System.currentTimeMillis() + waitMs;
+        while (System.currentTimeMillis() < end) {
+            if (progress != null && progress.getVisibility() != View.VISIBLE) return true;
+            try { Thread.sleep(150); } catch (InterruptedException e) { break; }
+        }
+        return progress == null || progress.getVisibility() != View.VISIBLE;
+    }
+
+    /** 后退（同步），能否后退 */
+    public boolean goBackAuto() {
+        final boolean[] ok = {false};
+        final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+        act.runOnUiThread(() -> { try { if (web != null && web.canGoBack()) { web.goBack(); ok[0] = true; } } catch (Exception ignored) {} latch.countDown(); });
+        try { latch.await(1200, java.util.concurrent.TimeUnit.MILLISECONDS); } catch (InterruptedException ignored) {}
+        return ok[0];
+    }
+
+    /** 截取当前窗口画面（浏览器页需可见）；失败返回 null */
+    public Bitmap screenshot() {
+        try {
+            final Bitmap[] box = {null};
+            final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+            act.runOnUiThread(() -> {
+                try {
+                    android.view.View decor = act.getWindow().getDecorView();
+                    int w = decor.getWidth(), h = decor.getHeight();
+                    if (w <= 0 || h <= 0) { latch.countDown(); return; }
+                    final Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+                    PixelCopy.request(act.getWindow(), new Rect(0, 0, w, h), bmp,
+                            result -> { box[0] = result == PixelCopy.SUCCESS ? bmp : null; latch.countDown(); },
+                            new Handler(Looper.getMainLooper()));
+                } catch (Exception e) { latch.countDown(); }
+            });
+            try { latch.await(2500, java.util.concurrent.TimeUnit.MILLISECONDS); } catch (InterruptedException ignored) {}
+            return box[0];
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** 设置 User-Agent（反爬对抗） */
+    public void setUa(final String ua) {
+        act.runOnUiThread(() -> { try { if (web != null) web.getSettings().setUserAgentString(ua); } catch (Exception ignored) {} });
+    }
+
+    /** 手动重注入反指纹脚本 */
+    public void armor() {
+        act.runOnUiThread(() -> { try { injectArmor(); } catch (Exception ignored) {} });
     }
 
     private static class IntentShim {

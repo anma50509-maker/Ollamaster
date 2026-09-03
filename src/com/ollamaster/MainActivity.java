@@ -289,6 +289,8 @@ public class MainActivity extends Activity {
         }
     }
 
+    public String currentTab() { return current; }
+
     public void switchTo(String key) {
         Page p = pages.get(key);
         if (p == null) return;
