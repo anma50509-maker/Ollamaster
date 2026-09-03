@@ -456,30 +456,156 @@ public class ChatPage extends Page {
         }
     }
 
-    /** 头像选择结果：拷贝到应用私有目录并写回当前人设 */
+    /** 头像选择结果：解码原图 → 打开应用内方形裁剪 → 保存 */
     private void handleAvatarResult(Uri uri) {
         final Personas.P p = avatarTarget;
         if (p == null) return;
         try {
-            java.io.File dir = new java.io.File(act.getFilesDir(), "persona_avatars");
-            dir.mkdirs();
-            java.io.File dst = new java.io.File(dir, "pa_" + p.id + ".jpg");
-            java.io.InputStream in = act.getContentResolver().openInputStream(uri);
-            java.io.FileOutputStream fo = new java.io.FileOutputStream(dst);
-            byte[] buf = new byte[8192];
-            int n;
-            while (in != null && (n = in.read(buf)) > 0) fo.write(buf, 0, n);
-            if (in != null) in.close();
-            fo.close();
-            p.avatar = dst.getAbsolutePath();
-            if (avatarPreview != null) {
-                Drawable d = loadAvatar(p.avatar, 56);
-                avatarPreview.setImageDrawable(d != null ? d : Icon.v(act, "avatar", t.accent, 40));
+            Bitmap bmp = decodeSampled(uri, 2048);
+            if (bmp == null) {
+                Ui.toast(act, "无法读取该图片");
+                return;
             }
-            Ui.toast(act, "头像已设置");
+            showCropDialog(p, bmp);
         } catch (Exception e) {
-            Ui.toast(act, "头像保存失败：" + e.getMessage());
+            Ui.toast(act, "头像读取失败：" + e.getMessage());
         }
+    }
+
+    /** 采样解码，限制长边 ≤ max，避免大图 OOM */
+    private Bitmap decodeSampled(Uri uri, int max) throws Exception {
+        java.io.InputStream in = act.getContentResolver().openInputStream(uri);
+        BitmapFactory.Options o = new BitmapFactory.Options();
+        o.inJustDecodeBounds = true;
+        BitmapFactory.decodeStream(in, null, o);
+        if (in != null) in.close();
+        int w = o.outWidth, h = o.outHeight;
+        if (w <= 0 || h <= 0) return null;
+        int sample = 1;
+        while (w / sample > max || h / sample > max) sample *= 2;
+        java.io.InputStream in2 = act.getContentResolver().openInputStream(uri);
+        BitmapFactory.Options o2 = new BitmapFactory.Options();
+        o2.inSampleSize = sample;
+        Bitmap b = BitmapFactory.decodeStream(in2, null, o2);
+        if (in2 != null) in2.close();
+        return b;
+    }
+
+    /** 应用内方形裁剪对话框：保持宽高比不拉伸，拖动平移 + 双指缩放 */
+    private void showCropDialog(final Personas.P p, final Bitmap bmp) {
+        final Dialog d = new Dialog(act);
+        d.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        d.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
+        d.getWindow().setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+
+        LinearLayout root = new LinearLayout(act);
+        root.setOrientation(LinearLayout.VERTICAL);
+
+        LinearLayout bar = new LinearLayout(act);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setGravity(Gravity.CENTER_VERTICAL);
+        bar.setPadding(Ui.dpi(act, 12), Ui.dpi(act, 10), Ui.dpi(act, 12), Ui.dpi(act, 10));
+        bar.setBackgroundColor(t.surfaceAlt);
+        TextView tt = new TextView(act);
+        tt.setText("裁剪头像（正方形）");
+        tt.setTextColor(t.textPri);
+        tt.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 15));
+        tt.setTypeface(Ui.serifBold());
+        bar.addView(tt, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        TextView cancel = Ui.btnGhost(act, t, "取消");
+        cancel.setOnClickListener(v -> d.dismiss());
+        bar.addView(cancel);
+        root.addView(bar);
+
+        final AvatarCropView crop = new AvatarCropView(act);
+        root.addView(crop, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        LinearLayout foot = new LinearLayout(act);
+        foot.setOrientation(LinearLayout.VERTICAL);
+        foot.setPadding(Ui.dpi(act, 12), Ui.dpi(act, 8), Ui.dpi(act, 12), Ui.dpi(act, 16));
+        foot.setBackgroundColor(t.surfaceAlt);
+        TextView hint = Ui.caption(act, t, "拖动图片调整位置，双指缩放大小，保持原比例不拉伸");
+        hint.setGravity(Gravity.CENTER);
+        foot.addView(hint);
+        foot.addView(Ui.gap(act, 8));
+        TextView ok = Ui.btnPrimary(act, t, "确定使用");
+        ok.setOnClickListener(v -> {
+            Bitmap sq = crop.crop();
+            if (sq == null) { d.dismiss(); return; }
+            try {
+                java.io.File dir = new java.io.File(act.getFilesDir(), "persona_avatars");
+                dir.mkdirs();
+                java.io.File dst = new java.io.File(dir, "pa_" + p.id + ".png");
+                java.io.FileOutputStream fo = new java.io.FileOutputStream(dst);
+                sq.compress(Bitmap.CompressFormat.PNG, 100, fo);
+                fo.close();
+                if (!sq.equals(bmp)) sq.recycle();
+                p.avatar = dst.getAbsolutePath();
+                if (avatarPreview != null) {
+                    Drawable dd = loadAvatar(p.avatar, 56);
+                    avatarPreview.setImageDrawable(dd != null ? dd : Icon.v(act, "avatar", t.accent, 40));
+                }
+                Ui.toast(act, "头像已设置");
+            } catch (Exception e) {
+                Ui.toast(act, "头像保存失败：" + e.getMessage());
+            }
+            d.dismiss();
+        });
+        foot.addView(ok, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        root.addView(foot);
+
+        d.setContentView(root);
+        d.show();
+        crop.setImage(bmp);
+    }
+
+    /** 全屏独立文本选择面板：列表内不进入系统选择（避免卡顿），需要选区时在此顺滑选择/复制 */
+    private void showTextSelect(final ConvStore.Msg m) {
+        final Dialog d = new Dialog(act);
+        d.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        d.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
+        d.getWindow().setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+        LinearLayout root = new LinearLayout(act);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(t.bg);
+
+        LinearLayout bar = new LinearLayout(act);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setGravity(Gravity.CENTER_VERTICAL);
+        bar.setPadding(Ui.dpi(act, 14), Ui.dpi(act, 10), Ui.dpi(act, 10), Ui.dpi(act, 10));
+        bar.setBackgroundColor(t.surfaceAlt);
+        TextView title = new TextView(act);
+        title.setText("选择文本");
+        title.setTextColor(t.textPri);
+        title.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 16));
+        title.setTypeface(Ui.serifBold());
+        bar.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        TextView copy = Ui.btnGhost(act, t, "复制全文");
+        copy.setOnClickListener(v -> { Ui.copy(act, m.content); d.dismiss(); });
+        bar.addView(copy);
+        TextView closeX = new TextView(act);
+        closeX.setText("");
+        closeX.setTextColor(t.textSec);
+        Icon.pinCenter(closeX, "close", 16);
+        closeX.setPadding(Ui.dpi(act, 8), Ui.dpi(act, 4), Ui.dpi(act, 4), Ui.dpi(act, 4));
+        closeX.setOnClickListener(v -> d.dismiss());
+        bar.addView(closeX);
+        root.addView(bar);
+
+        TextView tv = new TextView(act);
+        tv.setText(m.content == null ? "" : m.content);
+        tv.setTextColor(t.textPri);
+        tv.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 14.5f));
+        tv.setLineSpacing(0, 1.3f);
+        tv.setPadding(Ui.dpi(act, 16), Ui.dpi(act, 10), Ui.dpi(act, 16), Ui.dpi(act, 120));
+        tv.setGravity(Gravity.TOP);
+        tv.setTextIsSelectable(true);
+        root.addView(tv, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        d.setContentView(root);
+        d.show();
     }
 
     /** 把 SAF 文档拷入应用私有目录，返回绝对路径（后续轮次可稳定读取） */
@@ -1722,7 +1848,6 @@ public class ChatPage extends Page {
         tv.setTextColor(t.mixTextOn(t));
         tv.setText(m.content);
         tv.setHighlightColor(0x55FFFFFF);
-        tv.setTextIsSelectable(true);
         tv.setBackground(Ui.radii(t.alpha(t.accent, 0.92f), Ui.dpi(act, 17),
                 Ui.dpi(act, 4), Ui.dpi(act, 17), Ui.dpi(act, 17)));
         tv.setMaxWidth(Ui.dpi(act, 272));
@@ -1794,7 +1919,6 @@ public class ChatPage extends Page {
         tv.setLineSpacing(0, 1.3f);
         tv.setMovementMethod(LinkMovementMethod.getInstance());
         tv.setHighlightColor(t.alpha(t.accent, 0.26f));
-        tv.setTextIsSelectable(true);
         int pad = Ui.dpi(act, 13);
         tv.setPadding(pad, pad - 3, pad, pad - 3);
         tv.setBackground(Ui.radii(t.surfaceAlt, Ui.dpi(act, 4), Ui.dpi(act, 17),
@@ -1969,6 +2093,7 @@ public class ChatPage extends Page {
         box.addView(Ui.gap(act, 8));
         final Dialog[] d = new Dialog[1];
         addMenuItem(box, "复制全文", "copy", () -> Ui.copy(act, m.content));
+        addMenuItem(box, "选择文本", "edit", () -> showTextSelect(m));
         addMenuItem(box, "朗读此消息", "voice", () -> {
             if (m.content == null || m.content.trim().isEmpty()) {
                 Ui.toast(act, "该消息无内容可朗读");
