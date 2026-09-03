@@ -466,20 +466,21 @@ public class SettingsPage extends Page {
         LinearLayout card = section(root, "语音合成 (TTS)");
         final Prefs p = Prefs.get(act);
 
-        // 引擎模式切换
+        // 引擎模式切换（旧版「系统引擎」已移除，老配置自动迁移到 Edge 免费）
+        if ("system".equals(p.ttsMode())) p.ttsMode("edge");
         LinearLayout modeRow = baseRow(card);
-        rowTitle(modeRow, "引擎", "系统引擎（离线/零配置）或 HTTP API");
+        rowTitle(modeRow, "引擎", "Edge 免费（微软·免Key）或 HTTP API");
         LinearLayout modeBox = new LinearLayout(act);
         modeBox.setOrientation(LinearLayout.HORIZONTAL);
-        final LinearLayout btnSys = modeBtn("系统引擎", "离线即时", "system".equals(p.ttsMode()));
+        final LinearLayout btnEdge = modeBtn("Edge 免费", "微软·免Key", "edge".equals(p.ttsMode()));
         final LinearLayout btnHttp = modeBtn("HTTP API", "第三方合成", "http".equals(p.ttsMode()));
         LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(0, Ui.dpi(act, 52), 1f);
         mlp.rightMargin = Ui.dpi(act, 6);
-        modeBox.addView(btnSys, mlp);
+        modeBox.addView(btnEdge, mlp);
         modeBox.addView(btnHttp, new LinearLayout.LayoutParams(0, Ui.dpi(act, 52), 1f));
         modeRow.addView(modeBox, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        btnSys.setOnClickListener(v -> {
-            p.ttsMode("system");
+        btnEdge.setOnClickListener(v -> {
+            p.ttsMode("edge");
             rebuild();
         });
         btnHttp.setOnClickListener(v -> {
@@ -488,6 +489,25 @@ public class SettingsPage extends Page {
         });
         hair(card);
 
+        if ("edge".equals(p.ttsMode())) {
+            rowClick(card, "声音", p.ttsVoice().isEmpty() ? "zh-CN-XiaoxiaoNeural" : p.ttsVoice(), () ->
+                    inputDialog("声音", "Edge 声音名，如 zh-CN-XiaoxiaoNeural(晓晓女声) / zh-CN-YunxiNeural(云希男声) 等",
+                            p.ttsVoice().isEmpty() ? "zh-CN-XiaoxiaoNeural" : p.ttsVoice(), false, false, s2 -> {
+                                if (!s2.trim().isEmpty()) p.ttsVoice(s2.trim());
+                            }));
+            hair(card);
+            sliderRow(card, "语速", 50, 200, Math.round(p.ttsSpeed() * 100), v -> v + "%", v -> p.ttsSpeed(v / 100f));
+            hair(card);
+            rowClick(card, "试听", "微软 Edge 免费合成，无需任何 Key", () -> {
+                TtsEngine.get(act).speak("你好，我是 Ollamaster。微软 Edge 免费语音合成测试成功。");
+                Ui.toast(act, "正在用 Edge 免费引擎朗读…");
+            });
+            hair(card);
+            rowClick(card, "停止朗读", "结束当前朗读", () -> {
+                TtsEngine.get(act).stop();
+                Ui.toast(act, "已停止");
+            });
+        }
         if ("http".equals(p.ttsMode())) {
             rowClick(card, "接口地址", p.ttsUrl(), () ->
                     inputDialog("接口地址", "OpenAI 兼容 /audio/speech 端点，如 https://api.openai.com/v1/audio/speech",
@@ -514,16 +534,6 @@ public class SettingsPage extends Page {
             rowClick(card, "试听", "朗读一段测试文本验证配置", () -> {
                 TtsEngine.get(act).speak("你好，我是 Ollamaster。语音合成功能已就绪。");
                 Ui.toast(act, "正在朗读测试文本…");
-            });
-        } else {
-            rowClick(card, "试听", "朗读一段测试文本", () -> {
-                TtsEngine.get(act).speak("你好，我是 Ollamaster。系统语音引擎工作正常。");
-                Ui.toast(act, "正在朗读测试文本…");
-            });
-            hair(card);
-            rowClick(card, "停止朗读", "结束当前朗读", () -> {
-                TtsEngine.get(act).stop();
-                Ui.toast(act, "已停止");
             });
         }
     }
@@ -570,13 +580,13 @@ public class SettingsPage extends Page {
                 if (body != null) {
                     JSONObject j = new JSONObject(body);
                     int n = j.optJSONArray("data") == null ? 0 : j.optJSONArray("data").length();
-                    res = "✓ 连接成功 · " + n + " 个模型";
+                    res = "连接成功 · " + n + " 个模型";
                 } else {
-                    res = "✕ 连接失败";
+                    res = "连接失败";
                 }
             } catch (Exception e) {
                 final String em = e.getMessage() == null ? "异常" : e.getMessage();
-                Ui.H.post(() -> Ui.toast(act, "✕ " + em));
+                Ui.H.post(() -> Ui.toast(act, em));
                 return;
             }
             Ui.H.post(() -> Ui.toast(act, res));

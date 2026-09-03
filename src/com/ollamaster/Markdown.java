@@ -36,6 +36,18 @@ import java.util.regex.Pattern;
  */
 public class Markdown {
 
+    /** 任务列表勾选框：矢量图标替代 ☑/☐ 字符 */
+    private static void appendTaskBox(android.text.SpannableStringBuilder out, boolean done, Theme t, Context ctx) {
+        int start = out.length();
+        out.append(' ');
+        android.graphics.drawable.Drawable d = Icon.v(ctx, done ? "checkBox" : "uncheck",
+                done ? t.alpha(t.textSec, 0.9f) : t.textPri, 13);
+        int sz = Ui.dpi(ctx, 13);
+        d.setBounds(0, 0, sz, sz);
+        out.setSpan(new android.text.style.ImageSpan(d, android.text.style.ImageSpan.ALIGN_BOTTOM),
+                start, out.length(), android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+    }
+
     public static CharSequence render(Context ctx, String raw, Theme t) {
         SpannableStringBuilder out = new SpannableStringBuilder();
         if (raw == null) return out;
@@ -136,7 +148,7 @@ public class Markdown {
             m = P_TASK.matcher(line);
             if (m.find()) {
                 boolean done = "x".equalsIgnoreCase(m.group(1));
-                out.append(done ? "☑ " : "☐ ");
+                appendTaskBox(out, done, t, ctx);
                 inline(out, m.group(2), t);
                 if (done) {
                     out.setSpan(new StrikethroughSpan(), start, out.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
@@ -364,7 +376,7 @@ public class Markdown {
                     String alt = im.group(1);
                     String url = im.group(2);
                     int start = out.length();
-                    out.append("[🖼 ").append(alt == null || alt.isEmpty() ? "图片" : alt).append("]");
+                    out.append("[图片").append(alt == null || alt.isEmpty() ? "" : "：" + alt).append("]");
                     out.setSpan(new ForegroundColorSpan(t.accent), start, out.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                     out.setSpan(new LinkSpan(url), start, out.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
                     i += im.end();

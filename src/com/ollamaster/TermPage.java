@@ -113,8 +113,9 @@ public class TermPage extends Page {
         inputRow.setPadding(p, Ui.dpi(act, 4), Ui.dpi(act, 5), Ui.dpi(act, 4));
 
         TextView prompt = new TextView(act);
-        prompt.setText("❯");
+        prompt.setText("");
         prompt.setTextColor(t.accent);
+        Icon.pinLeft(prompt, "caret", 14);
         prompt.setTypeface(Ui.mono());
         prompt.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 14));
         prompt.setPadding(0, 0, Ui.dpi(act, 7), 0);
@@ -282,7 +283,7 @@ public class TermPage extends Page {
         }
         busy = true;
         updateRunBtn();
-        appendLine("❯ " + cmd, t.accent);
+        appendLine("> " + cmd, t.accent);
         flush();
         try {
             procIn.write(cmd + "\n");

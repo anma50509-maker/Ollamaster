@@ -30,7 +30,7 @@ public class Plugins {
     }
 
     public static class Page {
-        public String id = "", label = "", icon = "◈";
+        public String id = "", label = "", icon = "";
         public JSONObject layout;       // 声明式 UI JSON
     }
 
@@ -39,7 +39,7 @@ public class Plugins {
     }
 
     public static class Persona {
-        public String name = "", emoji = "✦", desc = "", prompt = "";
+        public String name = "", emoji = "", desc = "", prompt = "";
     }
 
     public static class Plugin {
@@ -126,7 +126,7 @@ public class Plugins {
                     Page page = new Page();
                     page.id = pg.optString("id", "");
                     page.label = pg.optString("label", page.id);
-                    page.icon = pg.optString("icon", "◈");
+                    page.icon = pg.optString("icon", "");
                     page.layout = pg.optJSONObject("layout");
                     if (page.layout == null) page.layout = new JSONObject();
                     if (!page.id.isEmpty()) p.pages.add(page);
@@ -150,7 +150,7 @@ public class Plugins {
                     JSONObject pe = personas.getJSONObject(i);
                     Persona per = new Persona();
                     per.name = pe.optString("name", "");
-                    per.emoji = pe.optString("emoji", "✦");
+                    per.emoji = pe.optString("emoji", "");
                     per.desc = pe.optString("desc", "");
                     per.prompt = pe.optString("prompt", "");
                     if (!per.name.isEmpty()) p.personas.add(per);

@@ -20,8 +20,17 @@ import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
+import android.widget.ImageView;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffXfermode;
+import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.Drawable;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import java.text.SimpleDateFormat;
@@ -39,8 +48,13 @@ public class ChatPage extends Page {
     private LinearLayout emptyBox;
     private EditText input;
     private TextView sendBtn, modelChip, personaChip, sysChip;
+    private TextView autoTtsBtn;
     private TextView attachBtn;
     private LinearLayout attachRow;
+    private ImageView emptyAvatar;
+    private Personas.P avatarTarget;
+    private ImageView avatarPreview;
+    private static final int REQ_AVATAR = 3377;
     /** 待发送附件：已拷入应用私有目录的绝对路径 */
     private final ArrayList<String> pendingAttaches = new ArrayList<>();
     private static final int REQ_PICK_FILE = 77;
@@ -75,10 +89,6 @@ public class ChatPage extends Page {
         AiHolder(TextView think, TextView main) { this.think = think; this.main = main; }
     }
 
-    /** 回旋加载指示：◐◓◑◒ 依次旋转 */
-    private static String spinnerFrame() {
-        return String.valueOf("◐◓◑◒".charAt(((int) (android.os.SystemClock.elapsedRealtime() / 130)) & 3));
-    }
 
     private static int idxOf(String s, String tag) {
         return s.toLowerCase(Locale.US).indexOf(tag);
@@ -91,14 +101,16 @@ public class ChatPage extends Page {
     /** 思考折叠条：收起为一行摘要，点击展开/收起全文（半透明小字号） */
     private void applyThinkBlock(TextView think, String key, String thinkText) {
         boolean expanded = expandedCards.contains(key);
+        Icon.unpin(think);
         if (expanded) {
-            think.setText("💭 已深度思考 ▾\n" + thinkText.trim());
+            think.setText("已深度思考\n" + thinkText.trim());
             think.setMaxLines(500);
         } else {
-            think.setText("💭 已深度思考 ▸");
+            think.setText("已深度思考");
             think.setMaxLines(1);
         }
         think.setVisibility(View.VISIBLE);
+        Icon.pinLeft(think, "think", 13);
         think.setOnClickListener(v -> {
             if (expandedCards.contains(key)) expandedCards.remove(key);
             else expandedCards.add(key);
@@ -192,7 +204,8 @@ public class ChatPage extends Page {
         bar.setGravity(Gravity.CENTER_VERTICAL);
         bar.setPadding(Ui.dpi(act, 14), Ui.dpi(act, 2), Ui.dpi(act, 14), Ui.dpi(act, 6));
 
-        modelChip = Ui.chip(act, t, "模型 ▾", false);
+        modelChip = Ui.chip(act, t, "模型", false);
+        Icon.pinRight(modelChip, "chevronDown", 10);
         modelChip.setGravity(Gravity.CENTER);
         modelChip.setOnClickListener(v -> modelSheet());
         bar.addView(modelChip, new LinearLayout.LayoutParams(
@@ -200,7 +213,9 @@ public class ChatPage extends Page {
         LinearLayout.LayoutParams mlp = (LinearLayout.LayoutParams) modelChip.getLayoutParams();
         mlp.rightMargin = Ui.dpi(act, 6);
 
-        personaChip = Ui.chip(act, t, "人设 ✦", false);
+        personaChip = Ui.chip(act, t, "人设", false);
+        Icon.pinLeft(personaChip, "star", 11);
+        Icon.pinRight(personaChip, "chevronDown", 10);
         personaChip.setGravity(Gravity.CENTER);
         personaChip.setOnClickListener(v -> personaSheet());
         bar.addView(personaChip, new LinearLayout.LayoutParams(
@@ -208,12 +223,26 @@ public class ChatPage extends Page {
         LinearLayout.LayoutParams plp = (LinearLayout.LayoutParams) personaChip.getLayoutParams();
         plp.rightMargin = Ui.dpi(act, 6);
 
-        sysChip = Ui.chip(act, t, "系统 ▾", false);
+        sysChip = Ui.chip(act, t, "系统", false);
+        Icon.pinRight(sysChip, "chevronDown", 10);
         sysChip.setGravity(Gravity.CENTER);
         sysChip.setOnClickListener(v -> editSystemPrompt());
         bar.addView(sysChip, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, Ui.dpi(act, 30)));
         ((LinearLayout.LayoutParams) sysChip.getLayoutParams()).rightMargin = Ui.dpi(act, 6);
+
+        autoTtsBtn = Ui.chip(act, t, "语音", Prefs.get(act).autoTts());
+        Icon.pinLeft(autoTtsBtn, Prefs.get(act).autoTts() ? "voice" : "voiceOff", 13);
+        autoTtsBtn.setGravity(Gravity.CENTER);
+        autoTtsBtn.setOnClickListener(v -> {
+            boolean on = !Prefs.get(act).autoTts();
+            Prefs.get(act).autoTts(on);
+            refreshChips();
+            Ui.toast(act, on ? "自动语音已开启：AI 每句回复自动朗读" : "自动语音已关闭");
+        });
+        bar.addView(autoTtsBtn, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, Ui.dpi(act, 30)));
+        ((LinearLayout.LayoutParams) autoTtsBtn.getLayoutParams()).rightMargin = Ui.dpi(act, 6);
         if (!Prefs.get(act).editMode()) {
             plp.weight = 1;
             View spacer0 = new View(act);
@@ -251,14 +280,13 @@ public class ChatPage extends Page {
         box.setGravity(Gravity.CENTER);
         box.setClickable(false);
 
-        TextView ring = new TextView(act);
-        ring.setText("◈");
-        ring.setTextColor(t.accent);
-        ring.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 46));
-        ring.setGravity(Gravity.CENTER);
+        FrameLayout ring = new FrameLayout(act);
         GradientDrawable g = Ui.stroke(t.alpha(t.accent, 0.14f), t.alpha(t.accent, 0.55f),
                 Ui.dpi(act, 999), Ui.dpi(act, 1.2f));
         ring.setBackground(g);
+        emptyAvatar = new ImageView(act);
+        emptyAvatar.setImageDrawable(Icon.v(act, "avatar", t.accent, 34));
+        ring.addView(emptyAvatar, new FrameLayout.LayoutParams(Ui.dpi(act, 40), Ui.dpi(act, 40), Gravity.CENTER));
         box.addView(ring, new LinearLayout.LayoutParams(Ui.dpi(act, 86), Ui.dpi(act, 86)));
 
         box.addView(Ui.gap(act, 18));
@@ -356,9 +384,9 @@ public class ChatPage extends Page {
 
         sendBtn = new TextView(act);
         sendBtn.setGravity(Gravity.CENTER);
-        sendBtn.setText("➤");
+        sendBtn.setText("");
         sendBtn.setTextColor(t.mixTextOn(t));
-        sendBtn.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 16));
+        Icon.pinCenter(sendBtn, "send", 20);
         sendBtn.setBackground(Ui.ripple(Ui.round(t.accent, Ui.dpi(act, 999)), t.alpha(t.textPri, 0.3f)));
         sendBtn.setOnClickListener(v -> onSendTap());
         LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(Ui.dpi(act, 40), Ui.dpi(act, 40));
@@ -396,6 +424,10 @@ public class ChatPage extends Page {
 
     @Override
     public void onActivityResult(int req, int res, Intent data) {
+        if (req == REQ_AVATAR) {
+            if (res == android.app.Activity.RESULT_OK && data != null && data.getData() != null) handleAvatarResult(data.getData());
+            return;
+        }
         if (req != REQ_PICK_FILE || res != android.app.Activity.RESULT_OK || data == null) return;
         ArrayList<Uri> uris = new ArrayList<>();
         android.content.ClipData clip = data.getClipData();
@@ -419,6 +451,32 @@ public class ChatPage extends Page {
         if (ok > 0) {
             renderAttachChips();
             Ui.toast(act, "已添加 " + ok + " 个附件，随下一条消息发送");
+        }
+    }
+
+    /** 头像选择结果：拷贝到应用私有目录并写回当前人设 */
+    private void handleAvatarResult(Uri uri) {
+        final Personas.P p = avatarTarget;
+        if (p == null) return;
+        try {
+            java.io.File dir = new java.io.File(act.getFilesDir(), "persona_avatars");
+            dir.mkdirs();
+            java.io.File dst = new java.io.File(dir, "pa_" + p.id + ".jpg");
+            java.io.InputStream in = act.getContentResolver().openInputStream(uri);
+            java.io.FileOutputStream fo = new java.io.FileOutputStream(dst);
+            byte[] buf = new byte[8192];
+            int n;
+            while (in != null && (n = in.read(buf)) > 0) fo.write(buf, 0, n);
+            if (in != null) in.close();
+            fo.close();
+            p.avatar = dst.getAbsolutePath();
+            if (avatarPreview != null) {
+                Drawable d = loadAvatar(p.avatar, 56);
+                avatarPreview.setImageDrawable(d != null ? d : Icon.v(act, "avatar", t.accent, 40));
+            }
+            Ui.toast(act, "头像已设置");
+        } catch (Exception e) {
+            Ui.toast(act, "头像保存失败：" + e.getMessage());
         }
     }
 
@@ -458,10 +516,10 @@ public class ChatPage extends Page {
         return dst.getAbsolutePath();
     }
 
-    private static String attachIcon(String path) {
-        if (ConvStore.isImage(path)) return "🖼";
-        if (ConvStore.isTextName(path)) return "📄";
-        return "📎";
+    private static String attachKind(String path) {
+        if (ConvStore.isImage(path)) return "img";
+        if (ConvStore.isTextName(path)) return "file";
+        return "attach";
     }
 
     private static String attachLabel(String path) {
@@ -479,7 +537,9 @@ public class ChatPage extends Page {
         attachRow.setVisibility(View.VISIBLE);
         for (final String p : pendingAttaches) {
             TextView chip = new TextView(act);
-            chip.setText(attachIcon(p) + " " + attachLabel(p) + " ✕");
+            chip.setText(attachLabel(p));
+            Icon.pinLeft(chip, attachKind(p), 12);
+            Icon.pinRight(chip, "close", 10);
             chip.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 11.5f));
             chip.setTextColor(t.textSec);
             chip.setSingleLine(true);
@@ -642,9 +702,9 @@ public class ChatPage extends Page {
                 h.think.setVisibility(View.VISIBLE);
                 h.think.setMaxLines(10);
                 h.think.setOnClickListener(null);
-                h.think.setText(spinnerFrame() + " 思考中\n" + tailOf(thinkText));
+                h.think.setText("思考中…\n" + tailOf(thinkText));
                 h.main.setVisibility(View.GONE);
-                next = spinnerFrame() + tailOf(thinkText);
+                next = tailOf(thinkText);
             } else {
                 if (showThink && thinkText != null && !thinkText.trim().isEmpty()) {
                     applyThinkBlock(h.think, "think|" + streamMsg.ts, thinkText);
@@ -703,15 +763,58 @@ public class ChatPage extends Page {
                 if (me.name.equals(model)) { provider = me.provider; break; }
             }
         }
-        String chipText = (cloud ? "☁ " : "") + mShort;
+        String chipText = mShort;
         if (!provider.isEmpty()) chipText += " · " + provider;
-        modelChip.setText(chipText + " ▾");
-        personaChip.setText(persona == null ? "人设 ✦" : "✦ " + persona.name);
+        modelChip.setText(chipText);
+        modelChip.setCompoundDrawables(null, null, null, null);
+        Icon.pinRight(modelChip, "chevronDown", 10);
+        if (cloud) Icon.pinLeft(modelChip, "cloud", 11);
+        personaChip.setText(persona == null ? "人设" : persona.name);
         personaChip.setTextColor(persona != null ? t.mixTextOn(t) : t.textSec);
+        personaChip.setCompoundDrawables(null, null, null, null);
+        Icon.pinLeft(personaChip, "star", 11);
+        Icon.pinRight(personaChip, "chevronDown", 10);
         personaChip.setBackground(persona != null
                 ? Ui.round(t.accent, Ui.dpi(act, 999))
                 : Ui.ripple(Ui.round(t.alpha(t.textPri, 0.06f), Ui.dpi(act, 999)), t.alpha(t.textPri, 0.15f)));
-        sysChip.setText(Prefs.get(act).sysPrompt().isEmpty() ? "系统 ▾" : "系统 ●");
+        sysChip.setText("系统");
+        sysChip.setCompoundDrawables(null, null, null, null);
+        Icon.pinRight(sysChip, "chevronDown", 10);
+        if (!Prefs.get(act).sysPrompt().isEmpty()) Icon.pinLeft(sysChip, "dot", 7);
+        refreshEmptyAvatar();
+    }
+
+    /** 刷新空状态大头像：跟随当前人设，无头像时显示默认图标 */
+    private void refreshEmptyAvatar() {
+        if (emptyAvatar == null) return;
+        Drawable d = persona != null ? loadAvatar(persona.avatar, 40) : null;
+        emptyAvatar.setImageDrawable(d != null ? d : Icon.v(act, "avatar", t.accent, 34));
+    }
+
+    /** 供 LocalTools 设置变更后刷新顶部状态（模型/人设/系统/自动语音） */
+    public void refreshChips() {
+        if (act == null) return;
+        updateChips();
+        if (autoTtsBtn != null) {
+            boolean on = Prefs.get(act).autoTts();
+            autoTtsBtn.setText("语音");
+            autoTtsBtn.setCompoundDrawables(null, null, null, null);
+            Icon.pinLeft(autoTtsBtn, on ? "voice" : "voiceOff", 13);
+            autoTtsBtn.setTextColor(on ? t.mixTextOn(t) : t.textSec);
+            autoTtsBtn.setBackground(on
+                    ? Ui.round(t.accent, Ui.dpi(act, 999))
+                    : Ui.ripple(Ui.round(t.alpha(t.textPri, 0.06f), Ui.dpi(act, 999)), t.alpha(t.textPri, 0.15f)));
+        }
+    }
+
+    /** 提取用于朗读的纯文本：去掉思考链与 Markdown 符号 */
+    private static String stripForSpeech(String s) {
+        if (s == null) return "";
+        return s.replaceAll("(?s)<think>.*?</think>", " ")
+                .replaceAll("```", " ")
+                .replaceAll("[*_`#>]", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
     }
 
     public void loadModels() {
@@ -981,7 +1084,7 @@ public class ChatPage extends Page {
         }
         if (sb.length() == 0) return conv.summary;
         final int kb = (int) (sb.length() / 1000);
-        Ui.H.post(() -> pushNotice("🧠 正在压缩早期对话（约 " + Math.max(kb, 1) + "k 字符）为摘要…"));
+        Ui.H.post(() -> pushNotice("正在压缩早期对话（约 " + Math.max(kb, 1) + "k 字符）为摘要…"));
         String summed = summarizeSync(sb.toString());
         if (summed.isEmpty()) return conv.summary;
         conv.summary = summed;
@@ -1233,9 +1336,9 @@ public class ChatPage extends Page {
             int total = (int) (android.os.SystemClock.elapsedRealtime() - t0);
             String msg;
             if (diag[0] == 0) {
-                msg = "📊 流式诊断：未收到任何增量块（服务端可能忽略了 stream 参数或整包返回）";
+                msg = "流式诊断：未收到任何增量块（服务端可能忽略了 stream 参数或整包返回）";
             } else {
-                msg = "📊 流式诊断：" + diag[0] + " 块 · 首块 " + diag[1] + "ms · 历时 " + total
+                msg = "流式诊断：" + diag[0] + " 块 · 首块 " + diag[1] + "ms · 历时 " + total
                         + "ms · 渲染 " + renderDiag[1] + " 次 · 首渲染 "
                         + (renderDiag[0] < 0 ? "无" : renderDiag[0] + "ms")
                         + "\n心跳" + flushDiag[0] + " · 调度" + flushDiag[4]
@@ -1307,13 +1410,18 @@ public class ChatPage extends Page {
             ConvStore.save(act, conv);
             refreshViews();
             scrollBottom();
+            // 自动语音：AI 每条气泡完成后入队朗读（含工具调用轮次的中间回复），队列顺序播放
+            if (!stopped && Prefs.get(act).autoTts()) {
+                String speech = stripForSpeech(placeholder.content);
+                if (!speech.isEmpty()) TtsEngine.get(act).speak(speech);
+            }
             boolean hasTools = placeholder.tools != null && !placeholder.tools.isEmpty();
             if (hasTools && !stopped && Prefs.get(act).editMode()) {
                 toolRounds++;
                 execToolsThenContinue(placeholder);
             } else if (!hasTools && !stopped && truncated && contDepth < 3 && acc.length() > 0) {
                 contDepth++;
-                pushNotice("✂ 回复因达到最大输出长度被截断，自动续写中（" + contDepth + "/3）");
+                pushNotice("回复达到最大输出长度被截断，自动续写中（" + contDepth + "/3）");
                 ConvStore.save(act, conv);
                 refreshViews();
                 scrollBottom();
@@ -1344,7 +1452,7 @@ public class ChatPage extends Page {
                     if ("assistant".equals(last.role) && last.content.isEmpty()) conv.msgs.remove(last);
                 }
                 final long delay = Math.min(2500L * retryCount, 8000);
-                pushNotice("请求失败：" + raw + "\n↻ " + (delay / 1000) + "s 后重试（"
+                pushNotice("请求失败：" + raw + "\n" + (delay / 1000) + " 秒后重试（"
                         + retryCount + "/" + max + "）");
                 ConvStore.save(act, conv);
                 refreshViews();
@@ -1391,11 +1499,14 @@ public class ChatPage extends Page {
         }
         int n = specs == null ? 0 : specs.length();
         if (n > 0) {
-            toolHint.setText("⚙ 已挂载 " + n + " 个工具（内置/插件/MCP），模型可自动调用");
+            toolHint.setText("已挂载 " + n + " 个工具（内置/插件/MCP），模型可自动调用");
             toolHint.setTextColor(t.alpha(t.ok, 0.95f));
+            Icon.unpin(toolHint);
+            Icon.pinLeft(toolHint, "gear", 12);
         } else {
             toolHint.setText("未挂载工具 · 需编辑模式 + 支持 function calling 的模型");
             toolHint.setTextColor(t.alpha(t.textSec, 0.85f));
+            Icon.unpin(toolHint);
         }
         toolHint.setVisibility(View.VISIBLE);
     }
@@ -1448,7 +1559,7 @@ public class ChatPage extends Page {
             // 立即显示"正在执行"反馈
             Ui.H.post(() -> {
                 if (conv == null) return;
-                pushNotice("⚙ 正在执行工具…（0/" + total + "）");
+                pushNotice("正在执行工具…（0/" + total + "）");
             });
             for (final ConvStore.ToolCall call : assistantMsg.tools) {
                 Mcps.Server[] found = null;
@@ -1500,10 +1611,10 @@ public class ChatPage extends Page {
                     conv.msgs.add(tm);
                     String preview = rt.length() > 60 ? rt.substring(0, 60) + "…" : rt;
                     preview = preview.replace("\n", " ");
-                    updateLastNotice("⚙ 执行中 " + dn + "/" + total + "：" + toolName + " → " + preview);
+                    updateLastNotice("执行中 " + dn + "/" + total + "：" + toolName + " → " + preview);
                     if (dn == total && conv != null) {
                         if (taskDone[0]) {
-                            pushNotice("✅ 任务完成：" + taskSummary[0]);
+                            pushNotice("任务完成：" + taskSummary[0]);
                             busyUi(false);
                             syncAgent(false);
                         } else {
@@ -1556,12 +1667,12 @@ public class ChatPage extends Page {
     private void busyUi(boolean b) {
         holdAwake(b);
         if (b) {
-            sendBtn.setText("■");
-            sendBtn.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 15));
+            sendBtn.setText("");
+            Icon.pinCenter(sendBtn, "stop", 18);
             sendBtn.setBackground(Ui.round(t.alpha(t.danger, 0.9f), Ui.dpi(act, 999)));
         } else {
-            sendBtn.setText("➤");
-            sendBtn.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 16));
+            sendBtn.setText("");
+            Icon.pinCenter(sendBtn, "send", 20);
             sendBtn.setBackground(Ui.round(t.accent, Ui.dpi(act, 999)));
         }
     }
@@ -1579,7 +1690,8 @@ public class ChatPage extends Page {
             chips.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
             for (String p : m.attaches) {
                 TextView chip = new TextView(act);
-                chip.setText(attachIcon(p) + " " + attachLabel(p));
+                chip.setText(attachLabel(p));
+                Icon.pinLeft(chip, attachKind(p), 12);
                 chip.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 10.5f));
                 chip.setTextColor(t.textSec);
                 chip.setSingleLine(true);
@@ -1606,6 +1718,8 @@ public class ChatPage extends Page {
         tv.setPadding(pad, pad - 3, pad, pad - 3);
         tv.setTextColor(t.mixTextOn(t));
         tv.setText(m.content);
+        tv.setHighlightColor(0x55FFFFFF);
+        tv.setTextIsSelectable(true);
         tv.setBackground(Ui.radii(t.alpha(t.accent, 0.92f), Ui.dpi(act, 17),
                 Ui.dpi(act, 4), Ui.dpi(act, 17), Ui.dpi(act, 17)));
         tv.setMaxWidth(Ui.dpi(act, 272));
@@ -1618,6 +1732,20 @@ public class ChatPage extends Page {
         lp.bottomMargin = Ui.dpi(act, 5);
         tv.setLayoutParams(lp);
 
+        // 时间戳行：同时提供长按消息菜单入口（文本选择模式已占用地板长按）
+        TextView umeta = new TextView(act);
+        umeta.setText(tf.format(new java.util.Date(m.ts)));
+        umeta.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 9.5f));
+        umeta.setTextColor(t.alpha(t.textSec, 0.9f));
+        umeta.setPadding(0, 0, Ui.dpi(act, 6), 0);
+        umeta.setGravity(Gravity.END);
+        umeta.setOnLongClickListener(vv -> {
+            msgMenu(m, false);
+            return true;
+        });
+        wrap.addView(umeta, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
         wrap.setOnLongClickListener(vv -> {
             msgMenu(m, false);
             return true;
@@ -1629,13 +1757,13 @@ public class ChatPage extends Page {
         LinearLayout row = new LinearLayout(act);
         row.setOrientation(LinearLayout.HORIZONTAL);
 
-        TextView avatar = new TextView(act);
-        avatar.setText("◈");
-        avatar.setTextColor(t.accent);
-        avatar.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 12));
-        avatar.setGravity(Gravity.CENTER);
+        FrameLayout avatar = new FrameLayout(act);
         avatar.setBackground(Ui.stroke(t.alpha(t.accent, 0.12f), t.alpha(t.accent, 0.45f),
                 Ui.dpi(act, 999), Ui.dpi(act, 0.9f)));
+        ImageView avImg = new ImageView(act);
+        Drawable avd = persona != null ? loadAvatar(persona.avatar, 16) : null;
+        avImg.setImageDrawable(avd != null ? avd : Icon.v(act, "avatar", t.accent, 14));
+        avatar.addView(avImg, new FrameLayout.LayoutParams(Ui.dpi(act, 16), Ui.dpi(act, 16), Gravity.CENTER));
         LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(Ui.dpi(act, 24), Ui.dpi(act, 24));
         alp.topMargin = Ui.dpi(act, 6);
         alp.rightMargin = Ui.dpi(act, 8);
@@ -1662,7 +1790,8 @@ public class ChatPage extends Page {
         tv.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.spi(act, 14.5f));
         tv.setLineSpacing(0, 1.3f);
         tv.setMovementMethod(LinkMovementMethod.getInstance());
-        tv.setHighlightColor(Color.TRANSPARENT);
+        tv.setHighlightColor(t.alpha(t.accent, 0.26f));
+        tv.setTextIsSelectable(true);
         int pad = Ui.dpi(act, 13);
         tv.setPadding(pad, pad - 3, pad, pad - 3);
         tv.setBackground(Ui.radii(t.surfaceAlt, Ui.dpi(act, 4), Ui.dpi(act, 17),
@@ -1719,6 +1848,10 @@ public class ChatPage extends Page {
         meta.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 9.5f));
         meta.setTextColor(t.alpha(t.textSec, 0.9f));
         meta.setPadding(Ui.dpi(act, 5), Ui.dpi(act, 3), Ui.dpi(act, 4), 0);
+        meta.setOnLongClickListener(v -> {
+            msgMenu(m, true);
+            return true;
+        });
         col.addView(meta);
 
         row.addView(col, new LinearLayout.LayoutParams(
@@ -1761,10 +1894,10 @@ public class ChatPage extends Page {
             if (isTool && !expanded) {
                 String head = m.content.replace('\n', ' ').trim();
                 if (head.length() > 60) head = head.substring(0, 60) + "…";
-                card.setText("⚙ " + m.toolName + " ▸ " + head);
+                card.setText("[" + m.toolName + "] " + head);
                 card.setMaxLines(1);
             } else {
-                card.setText((isTool ? "⚙ " + m.toolName + "\n" : "") + m.content);
+                card.setText((isTool ? "[" + m.toolName + "]\n" : "") + m.content);
                 card.setMaxLines(Integer.MAX_VALUE);
             }
         };
@@ -1832,8 +1965,8 @@ public class ChatPage extends Page {
         box.addView(Ui.title(act, t, "消息操作"));
         box.addView(Ui.gap(act, 8));
         final Dialog[] d = new Dialog[1];
-        addMenuItem(box, "复制全文", () -> Ui.copy(act, m.content));
-        addMenuItem(box, "🔊 朗读此消息", () -> {
+        addMenuItem(box, "复制全文", "copy", () -> Ui.copy(act, m.content));
+        addMenuItem(box, "朗读此消息", "voice", () -> {
             if (m.content == null || m.content.trim().isEmpty()) {
                 Ui.toast(act, "该消息无内容可朗读");
                 return;
@@ -1841,25 +1974,20 @@ public class ChatPage extends Page {
             TtsEngine.get(act).speak(m.content);
             d[0].dismiss();
         });
-        addMenuItem(box, "⏹ 停止朗读", () -> {
+        addMenuItem(box, "停止朗读", "stop", () -> {
             TtsEngine.get(act).stop();
             d[0].dismiss();
         });
-        if (allowRegen) addMenuItem(box, "重新生成本回复", this::regenerate);
-        addMenuItem(box, "删除该消息", () -> {
-            if (streaming) return;
-            conv.msgs.remove(m);
-            ConvStore.save(act, conv);
-            refreshViews();
-            refreshEmpty();
-        });
+        if (allowRegen) addMenuItem(box, "重新生成本回复", "refresh", this::regenerate);
+        addMenuItem(box, "删除该消息", "trash", () -> deleteMsg(m));
         d[0] = Ui.center(act, box, t);
         d[0].show();
     }
 
-    private void addMenuItem(LinearLayout box, String label, Runnable r) {
+    private void addMenuItem(LinearLayout box, String label, String iconName, Runnable r) {
         TextView it = new TextView(act);
         it.setText(label);
+        if (iconName != null) Icon.pinLeft(it, iconName, 15);
         it.setTextColor(t.textPri);
         it.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 14));
         it.setPadding(Ui.dpi(act, 6), Ui.dpi(act, 12), Ui.dpi(act, 6), Ui.dpi(act, 12));
@@ -1867,6 +1995,49 @@ public class ChatPage extends Page {
         it.setOnClickListener(v -> r.run());
         box.addView(it);
     }
+
+    /** 删除一条消息（流式中禁止） */
+    private void deleteMsg(final ConvStore.Msg m) {
+        if (streaming) return;
+        conv.msgs.remove(m);
+        ConvStore.save(act, conv);
+        refreshViews();
+        refreshEmpty();
+    }
+
+    /** 读取人设头像为圆形 Drawable；无头像/读取失败返回 null */
+    private Drawable loadAvatar(String path, float dp) {
+        if (path == null || path.isEmpty()) return null;
+        try {
+            Bitmap b = BitmapFactory.decodeFile(path);
+            if (b == null) return null;
+            int sz = Ui.dpi(act, dp);
+            Bitmap s = Bitmap.createScaledBitmap(b, sz, sz, true);
+            Bitmap out = Bitmap.createBitmap(sz, sz, Bitmap.Config.ARGB_8888);
+            Canvas c = new Canvas(out);
+            Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+            c.drawCircle(sz / 2f, sz / 2f, sz / 2f, p);
+            p.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.SRC_IN));
+            c.drawBitmap(s, 0, 0, p);
+            return new BitmapDrawable(act.getResources(), out);
+        } catch (Throwable e) {
+            return null;
+        }
+    }
+
+    /** 打开系统图片选择器，选中后复制到应用私有目录并设为当前人设头像 */
+    private void pickAvatar(final Personas.P p, final ImageView preview) {
+        avatarTarget = p;
+        avatarPreview = preview;
+        Intent i = new Intent(Intent.ACTION_GET_CONTENT);
+        i.setType("image/*");
+        try {
+            act.startActivityForResult(Intent.createChooser(i, "选择头像图片"), REQ_AVATAR);
+        } catch (Exception e) {
+            Ui.toast(act, "无法打开图片选择器");
+        }
+    }
+
 
     private void modelSheet() {
         t = Theme.of(act);
@@ -1890,9 +2061,9 @@ public class ChatPage extends Page {
                 while (row.getChildCount() < 3) row.addView(new TextView(act));
                 TextView radio = (TextView) row.getChildAt(0);
                 String name = models.get(i);
-                radio.setText(name.equals(model) ? "◉" : "○");
+                radio.setText("");
                 radio.setTextColor(name.equals(model) ? t.accent : t.textSec);
-                radio.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 14));
+                Icon.pinLeft(radio, name.equals(model) ? "radioOn" : "radioOff", 16);
                 radio.setPadding(0, 0, Ui.dpi(act, 10), 0);
                 TextView nameTv = (TextView) row.getChildAt(1);
                 nameTv.setText(name);
@@ -2014,9 +2185,9 @@ public class ChatPage extends Page {
                 desc.setMaxLines(1);
                 TextView radio = (TextView) row.getChildAt(2);
                 boolean sel = persona != null && persona.id.equals(p.id);
-                radio.setText(sel ? "◉" : "");
+                radio.setText("");
                 radio.setTextColor(t.accent);
-                radio.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 14));
+                Icon.pinLeft(radio, sel ? "radioOn" : "radioOff", 16);
                 row.setOnClickListener(v -> {
                     persona = (persona != null && persona.id.equals(p.id)) ? null : p;
                     if (conv != null) conv.personaId = persona != null ? persona.id : "";
@@ -2144,6 +2315,33 @@ public class ChatPage extends Page {
         nameE.setText(p.name);
         box.addView(nameE);
         box.addView(Ui.gap(act, 7));
+        // 头像：选择/上传图片，显示在 AI 气泡与空状态大图
+        LinearLayout avRow = new LinearLayout(act);
+        avRow.setOrientation(LinearLayout.HORIZONTAL);
+        avRow.setGravity(Gravity.CENTER_VERTICAL);
+        FrameLayout avCircle = new FrameLayout(act);
+        avCircle.setBackground(Ui.round(t.alpha(t.accent, 0.08f), Ui.dpi(act, 999)));
+        final ImageView avImg = new ImageView(act);
+        Drawable avd = loadAvatar(p.avatar, 56);
+        avImg.setImageDrawable(avd != null ? avd : Icon.v(act, "avatar", t.accent, 40));
+        avCircle.addView(avImg, new FrameLayout.LayoutParams(Ui.dpi(act, 56), Ui.dpi(act, 56), Gravity.CENTER));
+        avRow.addView(avCircle, new LinearLayout.LayoutParams(Ui.dpi(act, 64), Ui.dpi(act, 64)));
+        LinearLayout avBtns = new LinearLayout(act);
+        avBtns.setOrientation(LinearLayout.VERTICAL);
+        TextView pick = Ui.btnGhost(act, t, "选择图片");
+        pick.setOnClickListener(v -> pickAvatar(p, avImg));
+        avBtns.addView(pick);
+        avBtns.addView(Ui.gap(act, 6));
+        TextView clear = Ui.btnGhost(act, t, "清除头像");
+        clear.setOnClickListener(v -> {
+            p.avatar = "";
+            avImg.setImageDrawable(Icon.v(act, "avatar", t.accent, 40));
+        });
+        avBtns.addView(clear);
+        avRow.addView(avBtns, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        box.addView(avRow);
+        box.addView(Ui.gap(act, 7));
+
         final EditText emojiE = Ui.input(act, t, "图标（一个字符）", false);
         emojiE.setText(p.emoji);
         box.addView(emojiE);
@@ -2167,7 +2365,6 @@ public class ChatPage extends Page {
         save.setOnClickListener(v -> {
             p.name = nameE.getText().toString().trim();
             p.emoji = emojiE.getText().toString().trim();
-            if (p.emoji.isEmpty()) p.emoji = "✦";
             p.desc = descE.getText().toString().trim();
             p.prompt = promptE.getText().toString().trim();
             if (!personas.contains(p)) personas.add(p);

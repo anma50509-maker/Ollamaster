@@ -182,7 +182,8 @@ public class ApiKeyManagerDialog {
         box.addView(Ui.gap(act, 10));
 
         // 自动扫描按钮
-        TextView scanBtn = Ui.btnGhost(act, t, "🔍 扫描可用模型");
+        TextView scanBtn = Ui.btnGhost(act, t, "扫描可用模型");
+        Icon.pinLeft(scanBtn, "search", 13);
         box.addView(scanBtn);
         box.addView(Ui.gap(act, 6));
 
@@ -225,9 +226,9 @@ public class ApiKeyManagerDialog {
                 row.setPadding(Ui.dpi(act, 4), Ui.dpi(act, 8), Ui.dpi(act, 4), Ui.dpi(act, 8));
 
                 TextView check = new TextView(act);
-                check.setText("☑");
+                check.setText("");
                 check.setTextColor(t.accent);
-                check.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 14));
+                Icon.pinLeft(check, "checkBox", 15);
                 check.setPadding(0, 0, Ui.dpi(act, 10), 0);
                 row.addView(check);
 
@@ -240,9 +241,9 @@ public class ApiKeyManagerDialog {
 
                 // 删除按钮
                 TextView delM = new TextView(act);
-                delM.setText("✕");
+                delM.setText("");
                 delM.setTextColor(t.alpha(t.danger, 0.7f));
-                delM.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 13));
+                Icon.pinLeft(delM, "close", 13);
                 delM.setOnClickListener(v -> {
                     scannedModels.remove(m);
                     renderModels[0].run();
@@ -291,13 +292,15 @@ public class ApiKeyManagerDialog {
                     Ui.H.post(() -> {
                         scannedModels.clear();
                         scannedModels.addAll(got);
-                        scanBtn.setText("🔍 扫描可用模型");
+                        scanBtn.setText("扫描可用模型");
+                        Icon.pinLeft(scanBtn, "search", 13);
                         scanResult.setText("扫描到 " + got.size() + " 个模型");
                         renderModels[0].run();
                     });
                 } catch (final Exception e) {
                     Ui.H.post(() -> {
-                        scanBtn.setText("🔍 扫描可用模型");
+                        scanBtn.setText("扫描可用模型");
+                        Icon.pinLeft(scanBtn, "search", 13);
                         scanResult.setText("扫描失败: " + (e.getMessage() == null ? "未知错误" : e.getMessage()));
                     });
                 }

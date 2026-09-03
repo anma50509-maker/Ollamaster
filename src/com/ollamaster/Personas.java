@@ -9,7 +9,7 @@ import java.util.List;
 
 public class Personas {
     public static class P {
-        public String id, name = "", emoji = "✦", desc = "", prompt = "";
+        public String id, name = "", emoji = "", desc = "", prompt = "", avatar = "";
         public boolean builtin;
     }
 
@@ -24,9 +24,10 @@ public class Personas {
                 P p = new P();
                 p.id = o.getString("id");
                 p.name = o.optString("name");
-                p.emoji = o.optString("emoji", "✦");
+                p.emoji = o.optString("emoji", "");
                 p.desc = o.optString("desc");
                 p.prompt = o.optString("prompt");
+                p.avatar = o.optString("avatar", "");
                 p.builtin = o.optBoolean("builtin");
                 out.add(p);
             }
@@ -64,6 +65,7 @@ public class Personas {
                 o.put("emoji", p.emoji);
                 o.put("desc", p.desc);
                 o.put("prompt", p.prompt);
+                o.put("avatar", p.avatar);
                 o.put("builtin", p.builtin);
                 arr.put(o);
             }
@@ -91,7 +93,7 @@ public class Personas {
     public static P blank() {
         P p = new P();
         p.id = ConvStore.newId();
-        p.emoji = "✦";
+        p.emoji = "";
         return p;
     }
 
@@ -99,11 +101,11 @@ public class Personas {
         File file = f(c);
         if (file.exists()) return;
         ArrayList<P> l = new ArrayList<>();
-        l.add(mk("默认助手", "✦", "通用智能助手", "你是一个乐于助人、思路清晰的中文智能助手。"));
-        l.add(mk("代码专家", "⌨", "编程与调试顾问", "你是一位资深软件工程师，回答注重代码质量与最佳实践，给出可运行的示例并解释关键点。"));
+        l.add(mk("默认助手", "", "通用智能助手", "你是一个乐于助人、思路清晰的中文智能助手。"));
+        l.add(mk("代码专家", "", "编程与调试顾问", "你是一位资深软件工程师，回答注重代码质量与最佳实践，给出可运行的示例并解释关键点。"));
         l.add(mk("翻译大师", "文A", "中英互译润色", "你是一位专业译者。用户发来内容时进行中英互译，保留原意与语气，译文自然流畅；如已是目标语言则润色。"));
-        l.add(mk("写作教练", "✎", "文案与创作", "你是一位文字功底深厚的写作教练，擅长各类文体创作与改写，风格凝练优雅。"));
-        l.add(mk("苏格拉底", "◈", "启发式提问者", "你是苏格拉底式导师，通过连续的启发性提问引导用户自己思考出答案，每次只问一两个问题。"));
+        l.add(mk("写作教练", "", "文案与创作", "你是一位文字功底深厚的写作教练，擅长各类文体创作与改写，风格凝练优雅。"));
+        l.add(mk("苏格拉底", "", "启发式提问者", "你是苏格拉底式导师，通过连续的启发性提问引导用户自己思考出答案，每次只问一两个问题。"));
         saveAllSync(c, l);
     }
 

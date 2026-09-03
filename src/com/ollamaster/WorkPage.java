@@ -246,8 +246,10 @@ public class WorkPage extends Page {
             }
             boolean dir = f.isDirectory();
             TextView icon = (TextView) row.getChildAt(0);
-            icon.setText(dir ? "▣" : "≡");
+            icon.setText("");
             icon.setTextColor(dir ? t.accent : t.alpha(t.textSec, 0.8f));
+            icon.setGravity(Gravity.CENTER);
+            Icon.pinCenter(icon, dir ? "folder" : "file", 15);
             icon.setBackground(Ui.round(t.alpha(dir ? t.accent : t.textPri, 0.07f), Ui.dpi(act, 9)));
             LinearLayout col = (LinearLayout) row.getChildAt(1);
             while (col.getChildCount() < 2) {
@@ -596,7 +598,8 @@ public class WorkPage extends Page {
             Switch sw = (Switch) vs[2];
             TextView instr = (TextView) card.getChildAt(1);
 
-            name.setText("✦ " + s.name);
+            name.setText(s.name);
+            Icon.pinLeft(name, "star", 13);
             name.setTextColor(t.textPri);
             name.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
             name.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 14));
@@ -815,9 +818,11 @@ public class WorkPage extends Page {
             url.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 10.5f));
             url.setMaxLines(1);
             boolean ok = s.status.contains("已连接");
-            boolean bad = s.status.contains("✕") || s.status.contains("失败");
-            status.setText("● " + s.status + (s.tools.length() > 0 ? " · " + s.tools.length() + " 工具" : ""));
+            boolean bad = s.status.contains("失败");
+            status.setText(s.status + (s.tools.length() > 0 ? " · " + s.tools.length() + " 工具" : ""));
             status.setTextColor(ok ? t.ok : bad ? t.danger : t.textSec);
+            Icon.unpin(status);
+            Icon.pinLeft(status, "dot", 8);
             status.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 11));
             sw.setChecked(s.enabled);
             sw.getThumbDrawable().setTintList(android.content.res.ColorStateList.valueOf(
@@ -915,7 +920,7 @@ public class WorkPage extends Page {
                     Ui.toast(act, s.name + " 连接成功 · " + tools.length() + " 个工具");
                 });
             } catch (Exception e) {
-                s.status = "✕ " + clip(e.getMessage(), 60);
+                s.status = "失败: " + clip(e.getMessage(), 60);
                 Mcps.saveAll(act, servers);
                 Ui.H.post(() -> {
                     if (mcpAdapter != null) mcpAdapter.notifyDataSetChanged();

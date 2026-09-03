@@ -52,9 +52,11 @@ public class MemoryPage extends Page {
         LinearLayout head = new LinearLayout(act);
         head.setOrientation(LinearLayout.HORIZONTAL);
         head.setGravity(Gravity.CENTER_VERTICAL);
-        TextView title = Ui.title(act, t, "🗂 记忆库");
+        TextView title = Ui.title(act, t, "记忆库");
+        Icon.pinLeft(title, "folder", 16);
         head.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        TextView addBtn = Ui.btnPrimary(act, t, "＋ 新增");
+        TextView addBtn = Ui.btnPrimary(act, t, "新增");
+        Icon.pinLeft(addBtn, "plus", 13);
         addBtn.setOnClickListener(v -> editDialog(null));
         head.addView(addBtn);
         col.addView(head);
@@ -65,7 +67,10 @@ public class MemoryPage extends Page {
         col.addView(statLine);
 
         // 搜索框
-        searchBox = Ui.input(act, t, "🔍 搜索记忆内容…", false);
+        searchBox = Ui.input(act, t, "搜索记忆内容…", false);
+        searchBox.setCompoundDrawablesWithIntrinsicBounds(
+                Icon.v(act, "search", t.alpha(t.textSec, 0.55f), 14), null, null, null);
+        searchBox.setCompoundDrawablePadding(Ui.dpi(act, 7));
         LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, Ui.dpi(act, 42));
         searchBox.setOnEditorActionListener((v, actionId, ev) -> { refresh(); return true; });
@@ -122,12 +127,12 @@ public class MemoryPage extends Page {
                 body.addView(none);
                 return;
             }
-            drawer("▾ 搜索结果（" + hits.size() + "）", hits, true);
+            drawer("搜索结果（" + hits.size() + "）", hits, true);
             return;
         }
 
         // 抽屉模式：全部 + 按一级分类分组
-        drawer("▾ 📂 全部记忆（" + all.size() + "）", all, true);
+        drawer("全部记忆（" + all.size() + "）", all, true);
         if (!cats.isEmpty()) {
             LinkedHashMap<String, List<MemoryStore.Item>> groups = new LinkedHashMap<>();
             for (MemoryStore.Item it : all) {
@@ -138,7 +143,7 @@ public class MemoryPage extends Page {
             }
             for (String group : new ArrayList<>(groups.keySet())) {
                 List<MemoryStore.Item> items = groups.get(group);
-                String label = "▸ 抽屉·" + group + "（" + items.size() + "）";
+                String label = "抽屉·" + group + "（" + items.size() + "）";
                 drawer(label, items, false);
             }
         }
@@ -156,11 +161,12 @@ public class MemoryPage extends Page {
         body.addView(card, lp);
 
         final TextView header = new TextView(act);
-        header.setText((defOpen ? "▾ " : "▸ ") + label);
+        header.setText(label);
         header.setTextColor(t.textPri);
         header.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.spi(act, 13.5f));
         header.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         header.setPadding(0, Ui.dpi(act, 8), 0, Ui.dpi(act, 8));
+        Icon.pinLeft(header, defOpen ? "chevronDown" : "chevronRight", 13);
         card.addView(header);
 
         final LinearLayout drawerBox = new LinearLayout(act);
@@ -174,7 +180,9 @@ public class MemoryPage extends Page {
             String base = label;
             int idx = base.indexOf(' ');
             if (idx > 0) base = base.substring(idx + 1);
-            header.setText((show ? "▾ " : "▸ ") + base);
+            header.setText(base);
+            header.setCompoundDrawables(null, null, null, null);
+            Icon.pinLeft(header, show ? "chevronDown" : "chevronRight", 13);
         });
 
         for (MemoryStore.Item it : items) {
@@ -199,9 +207,9 @@ public class MemoryPage extends Page {
         topRow.setGravity(Gravity.CENTER_VERTICAL);
 
         TextView arrow = new TextView(act);
-        arrow.setText("▸");
+        arrow.setText("");
         arrow.setTextColor(t.accent);
-        arrow.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.spi(act, 13));
+        Icon.pinCenter(arrow, "chevronRight", 13);
         LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(Ui.dpi(act, 22), ViewGroup.LayoutParams.WRAP_CONTENT);
         topRow.addView(arrow, alp);
 
@@ -286,7 +294,9 @@ public class MemoryPage extends Page {
         final boolean isNew = old == null;
         LinearLayout col = new LinearLayout(act);
         col.setOrientation(LinearLayout.VERTICAL);
-        col.addView(Ui.title(act, t, isNew ? "＋ 新增记忆" : "✏  编辑记忆"));
+        TextView et = Ui.title(act, t, isNew ? "新增记忆" : "编辑记忆");
+        Icon.pinLeft(et, isNew ? "plus" : "edit", 15);
+        col.addView(et);
 
         EditText t1 = Ui.input(act, t, "标题（必填，简洁概括）", false);
         if (old != null) t1.setText(old.title);
@@ -339,7 +349,7 @@ public class MemoryPage extends Page {
             it.tags = (t4.getText() == null ? "" : t4.getText().toString()).trim();
             it.updated = System.currentTimeMillis();
             MemoryStore.saveAll(act, items);
-            Ui.toast(act, isNew ? "✅ 记忆已保存" : "✅ 记忆已更新");
+            Ui.toast(act, isNew ? "记忆已保存" : "记忆已更新");
             d.dismiss();
             refresh();
         });
@@ -348,7 +358,9 @@ public class MemoryPage extends Page {
     private void confirmDelete(final MemoryStore.Item it) {
         LinearLayout col = new LinearLayout(act);
         col.setOrientation(LinearLayout.VERTICAL);
-        col.addView(Ui.title(act, t, "🗑 删除记忆"));
+        TextView dt = Ui.title(act, t, "删除记忆");
+        Icon.pinLeft(dt, "trash", 14);
+        col.addView(dt);
         TextView msg = Ui.caption(act, t, "确定删除「" + it.title + "」吗？此操作不可撤销。");
         msg.setPadding(0, Ui.dpi(act, 8), 0, Ui.dpi(act, 18));
         msg.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.spi(act, 13.5f));
@@ -368,7 +380,7 @@ public class MemoryPage extends Page {
         cancel.setOnClickListener(v -> d.dismiss());
         del.setOnClickListener(v -> {
             MemoryStore.remove(it.id);
-            Ui.toast(act, "🗑 已删除: " + it.title);
+            Ui.toast(act, "已删除: " + it.title);
             d.dismiss();
             refresh();
         });

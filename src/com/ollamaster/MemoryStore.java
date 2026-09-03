@@ -198,7 +198,7 @@ public class MemoryStore {
         it.tags = tags;
         it.updated = System.currentTimeMillis();
         saveAll(c, list);
-        return "✅ 已保存记忆 [" + it.id + "] " + title
+        return "已保存记忆 [" + it.id + "] " + title
                 + (category.isEmpty() ? "" : "（" + category + "）")
                 + (content.isEmpty() ? "（内容为空）" : "");
     }
@@ -221,7 +221,7 @@ public class MemoryStore {
         if (args.has("tags")) it.tags = args.optString("tags", it.tags).trim();
         it.updated = System.currentTimeMillis();
         saveAll(c, list);
-        return "✅ 已更新记忆 [" + it.id + "] " + it.title;
+        return "已更新记忆 [" + it.id + "] " + it.title;
     }
 
     /** mem_delete：按 id 删除 */
@@ -232,7 +232,7 @@ public class MemoryStore {
         if (it == null) return "未找到 id=" + id + " 的记忆";
         list.remove(it);
         saveAll(c, list);
-        return "🗑 已删除记忆: " + it.title;
+        return "已删除记忆: " + it.title;
     }
 
     public static String statsText() {
@@ -244,7 +244,7 @@ public class MemoryStore {
         sb.append("· 分类抽屉: ").append(cats.size()).append('\n');
         if (!cats.isEmpty()) {
             sb.append("· 分类树:\n");
-            for (String cat : cats) sb.append("   ▸ ").append(cat).append('\n');
+            for (String cat : cats) sb.append("   > ").append(cat).append('\n');
         }
         if (!all.isEmpty()) sb.append("· 最近更新: ").append(FMT.format(new Date(all.get(0).updated)));
         return sb.toString();

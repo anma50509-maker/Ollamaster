@@ -444,9 +444,9 @@ public class MainActivity extends Activity {
         TextView ti = Ui.title(this, t, "服务节点");
         headRow.addView(ti, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         TextView close = new TextView(this);
-        close.setText("✕");
+        close.setText("");
         close.setTextColor(t.textSec);
-        close.setTextSize(TypedValue.COMPLEX_UNIT_PX,Ui.sp(this, 15));
+        Icon.pinLeft(close, "close", 15);
         close.setOnClickListener(v -> hostDialog.dismiss());
         headRow.addView(close);
         box.addView(headRow);
@@ -495,9 +495,9 @@ public class MainActivity extends Activity {
             String h = Prefs.get(MainActivity.this).hosts().get(i);
             while (row.getChildCount() < 3) row.addView(new TextView(MainActivity.this));
             TextView radio = (TextView) row.getChildAt(0);
-            radio.setText(h.equals(Prefs.get(MainActivity.this).host()) ? "◉" : "○");
+            radio.setText("");
             radio.setTextColor(h.equals(Prefs.get(MainActivity.this).host()) ? t.accent : t.textSec);
-            radio.setTextSize(TypedValue.COMPLEX_UNIT_PX,Ui.sp(MainActivity.this, 15));
+            Icon.pinLeft(radio, h.equals(Prefs.get(MainActivity.this).host()) ? "radioOn" : "radioOff", 16);
             radio.setPadding(0, 0, Ui.dpi(MainActivity.this, 12), 0);
             TextView name = (TextView) row.getChildAt(1);
             name.setText(h + ":" + Prefs.get(MainActivity.this).port());

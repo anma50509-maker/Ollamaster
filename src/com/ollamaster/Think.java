@@ -28,7 +28,7 @@ public class Think {
         appendProse(out, s, i, s.length());
         if (open && !tailOpen) {
             if (out.length() > 0) out.append('\n');
-            out.append("🤔 思考中…");
+            out.append("思考中…");
         }
         return out.toString();
     }
@@ -41,7 +41,7 @@ public class Think {
 
     private static void appendThinkBlock(StringBuilder out, String seg, boolean unclosed) {
         if (out.length() > 0) out.append('\n');
-        String head = unclosed ? "🤔 思考中…" : "💭 已深度思考";
+        String head = unclosed ? "思考中…" : "已深度思考";
         String oneLine = seg.replace("\n", " ").trim();
         if (oneLine.length() > 60) oneLine = oneLine.substring(0, 60) + "…";
         out.append(head);

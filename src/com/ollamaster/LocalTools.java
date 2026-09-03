@@ -87,6 +87,14 @@ public class LocalTools {
                 new String[]{"text"}, new String[]{"要朗读的文本内容"}, new String[]{"text"}));
         out.put(fn2("tts_stop", "停止当前正在进行的语音朗读",
                 null, null, null));
+        out.put(fn2("list_settings", "列出应用所有可配置设置项及其当前值（AI 自行配置入口）",
+                null, null, null));
+        out.put(fn2("get_setting", "读取单个设置项的当前值",
+                new String[]{"key"}, new String[]{"设置键名，如 temperature / ttsMode / autoTts"}, new String[]{"key"}));
+        out.put(fn2("set_setting", "修改应用设置（AI 自行配置入口）。支持键：host,port,timeoutSec,retryMax,editMode,themeName,customTheme,fontScale,stream,showThink,streamDiag,temperature,topP,maxTokens,ctxMsgs,summaryKb,sysPrompt,cloudMode,cloudUrl,cloudKey,cloudModels,activeModel,activeCloudModel,ttsMode,ttsUrl,ttsKey,ttsModel,ttsVoice,ttsSpeed,autoTts,activeKeyIndex,apiKeyPool,workspace",
+                new String[]{"key", "value"},
+                new String[]{"设置键名（见描述）", "设置值：布尔用 true/false，数字用数值，字符串直接填写"},
+                new String[]{"key", "value"}));
         } catch (Exception ignored) {}
         return out;
     }
@@ -168,6 +176,7 @@ public class LocalTools {
             case "mem_list": case "mem_read": case "mem_search":
             case "mem_write": case "mem_update": case "mem_delete": case "mem_stats":
             case "tts_speak": case "tts_stop":
+            case "list_settings": case "get_setting": case "set_setting":
                 return true;
             default:
                 return false;
@@ -206,6 +215,9 @@ public class LocalTools {
             case "mem_stats": return MemoryStore.statsText();
             case "tts_speak": return ttsSpeak(args.optString("text", ""));
             case "tts_stop": { TtsEngine.get(App.inst).stop(); return "已停止朗读"; }
+            case "list_settings": return listSettings();
+            case "get_setting": return getSetting(args.getString("key"));
+            case "set_setting": return setSetting(args.getString("key"), args.optString("value", ""));
             default: throw new Exception("未知工具: " + name);
         }
     }
@@ -215,6 +227,157 @@ public class LocalTools {
         if (text == null || text.trim().isEmpty()) return "无内容可朗读";
         TtsEngine.get(App.inst).speak(text.trim());
         return "正在朗读：" + (text.trim().length() > 60 ? text.trim().substring(0, 60) + "…" : text.trim());
+    }
+
+    // ─── 设置管理（AI 自行配置入口） ───
+
+    private static String listSettings() {
+        Prefs p = Prefs.get(App.inst);
+        StringBuilder sb = new StringBuilder("应用设置清单（键 = 当前值）：\n");
+        sb.append("host = ").append(p.host()).append("\n");
+        sb.append("port = ").append(p.port()).append("\n");
+        sb.append("timeoutSec = ").append(p.timeoutSec()).append("\n");
+        sb.append("retryMax = ").append(p.retryMax()).append("\n");
+        sb.append("editMode = ").append(p.editMode()).append("（工具执行模式）\n");
+        sb.append("themeName = ").append(p.themeName()).append("\n");
+        sb.append("customTheme = ").append(p.customTheme()).append("\n");
+        sb.append("fontScale = ").append(p.fontScale()).append("\n");
+        sb.append("stream = ").append(p.stream()).append("（流式输出）\n");
+        sb.append("showThink = ").append(p.showThink()).append("（显示思考链）\n");
+        sb.append("streamDiag = ").append(p.streamDiag()).append("\n");
+        sb.append("temperature = ").append(p.temperature()).append("\n");
+        sb.append("topP = ").append(p.topP()).append("\n");
+        sb.append("maxTokens = ").append(p.maxTokens()).append("\n");
+        sb.append("ctxMsgs = ").append(p.ctxMsgs()).append("\n");
+        sb.append("summaryKb = ").append(p.summaryKb()).append("\n");
+        sb.append("sysPrompt = ").append(p.sysPrompt().isEmpty() ? "(空)" : p.sysPrompt()).append("\n");
+        sb.append("cloudMode = ").append(p.cloudMode()).append("（云端模式）\n");
+        sb.append("cloudUrl = ").append(p.cloudUrl()).append("\n");
+        sb.append("cloudKey = ").append(p.cloudKey().isEmpty() ? "(未设置)" : "••••已设置").append("\n");
+        sb.append("cloudModels = ").append(p.cloudModels()).append("\n");
+        sb.append("activeModel = ").append(p.activeModel().isEmpty() ? "(自动)" : p.activeModel()).append("\n");
+        sb.append("activeCloudModel = ").append(p.activeCloudModel().isEmpty() ? "(自动)" : p.activeCloudModel()).append("\n");
+        sb.append("ttsMode = ").append(p.ttsMode()).append("（system/http）\n");
+        sb.append("ttsUrl = ").append(p.ttsUrl()).append("\n");
+        sb.append("ttsKey = ").append(p.ttsKey().isEmpty() ? "(未设置)" : "••••已设置").append("\n");
+        sb.append("ttsModel = ").append(p.ttsModel()).append("\n");
+        sb.append("ttsVoice = ").append(p.ttsVoice()).append("\n");
+        sb.append("ttsSpeed = ").append(p.ttsSpeed()).append("\n");
+        sb.append("autoTts = ").append(p.autoTts()).append("（自动朗读 AI 回复）\n");
+        sb.append("activeKeyIndex = ").append(p.activeKeyIndex()).append("\n");
+        sb.append("apiKeyPool = ").append(p.apiKeyPool()).append("\n");
+        sb.append("workspace = ").append(p.workspace()).append("\n");
+        return sb.toString();
+    }
+
+    private static String getSetting(String key) throws Exception {
+        if (key == null || key.trim().isEmpty()) throw new Exception("key 不能为空，可用 list_settings 查看所有键");
+        String k = key.trim();
+        Prefs p = Prefs.get(App.inst);
+        switch (k) {
+            case "host": return "host = " + p.host();
+            case "port": return "port = " + p.port();
+            case "timeoutSec": return "timeoutSec = " + p.timeoutSec();
+            case "retryMax": return "retryMax = " + p.retryMax();
+            case "editMode": return "editMode = " + p.editMode();
+            case "themeName": return "themeName = " + p.themeName();
+            case "customTheme": return "customTheme = " + p.customTheme();
+            case "fontScale": return "fontScale = " + p.fontScale();
+            case "stream": return "stream = " + p.stream();
+            case "showThink": return "showThink = " + p.showThink();
+            case "streamDiag": return "streamDiag = " + p.streamDiag();
+            case "temperature": return "temperature = " + p.temperature();
+            case "topP": return "topP = " + p.topP();
+            case "maxTokens": return "maxTokens = " + p.maxTokens();
+            case "ctxMsgs": return "ctxMsgs = " + p.ctxMsgs();
+            case "summaryKb": return "summaryKb = " + p.summaryKb();
+            case "sysPrompt": return "sysPrompt = " + (p.sysPrompt().isEmpty() ? "(空)" : p.sysPrompt());
+            case "cloudMode": return "cloudMode = " + p.cloudMode();
+            case "cloudUrl": return "cloudUrl = " + p.cloudUrl();
+            case "cloudKey": return "cloudKey = " + (p.cloudKey().isEmpty() ? "(未设置)" : "••••已设置");
+            case "cloudModels": return "cloudModels = " + p.cloudModels();
+            case "activeModel": return "activeModel = " + (p.activeModel().isEmpty() ? "(自动)" : p.activeModel());
+            case "activeCloudModel": return "activeCloudModel = " + (p.activeCloudModel().isEmpty() ? "(自动)" : p.activeCloudModel());
+            case "ttsMode": return "ttsMode = " + p.ttsMode();
+            case "ttsUrl": return "ttsUrl = " + p.ttsUrl();
+            case "ttsKey": return "ttsKey = " + (p.ttsKey().isEmpty() ? "(未设置)" : "••••已设置");
+            case "ttsModel": return "ttsModel = " + p.ttsModel();
+            case "ttsVoice": return "ttsVoice = " + p.ttsVoice();
+            case "ttsSpeed": return "ttsSpeed = " + p.ttsSpeed();
+            case "autoTts": return "autoTts = " + p.autoTts();
+            case "activeKeyIndex": return "activeKeyIndex = " + p.activeKeyIndex();
+            case "apiKeyPool": return "apiKeyPool = " + p.apiKeyPool();
+            case "workspace": return "workspace = " + p.workspace();
+            default: throw new Exception("未知设置键: " + k + "（可用 list_settings 查看全部）");
+        }
+    }
+
+    private static String setSetting(String key, String value) throws Exception {
+        if (key == null || key.trim().isEmpty()) throw new Exception("key 不能为空");
+        String k = key.trim();
+        String v = value == null ? "" : value.trim();
+        Prefs p = Prefs.get(App.inst);
+        switch (k) {
+            case "host": p.host(v); break;
+            case "port": p.port(parseInt(v, "port")); break;
+            case "timeoutSec": p.timeoutSec(parseInt(v, "timeoutSec")); break;
+            case "retryMax": p.retryMax(parseInt(v, "retryMax")); break;
+            case "editMode": p.editMode(parseBool(v, "editMode")); break;
+            case "themeName": p.themeName(v); break;
+            case "customTheme": p.customTheme(parseBool(v, "customTheme")); break;
+            case "fontScale": p.fontScale(parseFloat(v, "fontScale")); break;
+            case "stream": p.stream(parseBool(v, "stream")); break;
+            case "showThink": p.showThink(parseBool(v, "showThink")); break;
+            case "streamDiag": p.streamDiag(parseBool(v, "streamDiag")); break;
+            case "temperature": p.temperature(parseFloat(v, "temperature")); break;
+            case "topP": p.topP(parseFloat(v, "topP")); break;
+            case "maxTokens": p.maxTokens(parseInt(v, "maxTokens")); break;
+            case "ctxMsgs": p.ctxMsgs(parseInt(v, "ctxMsgs")); break;
+            case "summaryKb": p.summaryKb(parseInt(v, "summaryKb")); break;
+            case "sysPrompt": p.sysPrompt(v); break;
+            case "cloudMode": p.cloudMode(parseBool(v, "cloudMode")); break;
+            case "cloudUrl": p.cloudUrl(v); break;
+            case "cloudKey": p.cloudKey(v); break;
+            case "cloudModels": p.cloudModels(v); break;
+            case "activeModel": p.activeModel(v); break;
+            case "activeCloudModel": p.activeCloudModel(v); break;
+            case "ttsMode":
+                if (!"system".equals(v) && !"http".equals(v) && !"edge".equals(v))
+                    throw new Exception("ttsMode 只能为 system / http / edge");
+                p.ttsMode(v); break;
+            case "ttsUrl": p.ttsUrl(v); break;
+            case "ttsKey": p.ttsKey(v); break;
+            case "ttsModel": p.ttsModel(v); break;
+            case "ttsVoice": p.ttsVoice(v); break;
+            case "ttsSpeed": p.ttsSpeed(parseFloat(v, "ttsSpeed")); break;
+            case "autoTts": p.autoTts(parseBool(v, "autoTts")); break;
+            case "activeKeyIndex": p.activeKeyIndex(parseInt(v, "activeKeyIndex")); break;
+            case "apiKeyPool": p.apiKeyPool(v); break;
+            case "workspace": p.workspace(v); break;
+            default: throw new Exception("未知设置键: " + k + "（可用 list_settings 查看全部）");
+        }
+        Ui.H.post(() -> {
+            MainActivity a = MainActivity.instance();
+            if (a != null && a.chatPage() != null) a.chatPage().refreshChips();
+        });
+        return "已设置 " + k + " = " + v;
+    }
+
+    private static int parseInt(String v, String k) throws Exception {
+        try { return Integer.parseInt(v.trim()); }
+        catch (Exception e) { throw new Exception(k + " 需要整数，收到: " + v); }
+    }
+
+    private static float parseFloat(String v, String k) throws Exception {
+        try { return Float.parseFloat(v.trim()); }
+        catch (Exception e) { throw new Exception(k + " 需要数字，收到: " + v); }
+    }
+
+    private static boolean parseBool(String v, String k) throws Exception {
+        String s = v.trim().toLowerCase();
+        if ("true".equals(s) || "1".equals(s) || "yes".equals(s) || "on".equals(s)) return true;
+        if ("false".equals(s) || "0".equals(s) || "no".equals(s) || "off".equals(s)) return false;
+        throw new Exception(k + " 需要 true/false，收到: " + v);
     }
     private static File resolve(String p) throws Exception {
         Prefs pref = Prefs.get(App.inst);
@@ -446,7 +609,7 @@ public class LocalTools {
                 target.status = "已连接";
                 sb.append("连接成功，发现 ").append(tools.length()).append(" 个工具，已挂载可用");
             } catch (Exception e) {
-                target.status = "✕ " + e.getMessage();
+                target.status = "失败: " + e.getMessage();
                 sb.append("已保存，但连接测试失败：").append(e.getMessage())
                   .append("（可在 工作台→MCP 中重新测试连接）");
             }

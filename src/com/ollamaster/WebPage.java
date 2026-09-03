@@ -92,7 +92,7 @@ public class WebPage extends Page {
         LinearLayout controls = new LinearLayout(act);
         controls.setOrientation(LinearLayout.HORIZONTAL);
         controls.setPadding(Ui.dpi(act, 12), Ui.dpi(act, 2), Ui.dpi(act, 12), Ui.dpi(act, 2));
-        String[] icons = {"‹", "⟳", "›", "⌂"};
+        String[] icons = {"back", "refresh", "forward", "home"};
         Runnable[] acts = {
                 () -> { if (web.canGoBack()) web.goBack(); },
                 () -> web.reload(),
@@ -102,9 +102,9 @@ public class WebPage extends Page {
         for (int i = 0; i < icons.length; i++) {
             TextView b = new TextView(act);
             final int idx = i;
-            b.setText(icons[i]);
+            b.setText("");
             b.setTextColor(t.textSec);
-            b.setTextSize(TypedValue.COMPLEX_UNIT_PX, i == 1 ? Ui.sp(act, 15) : Ui.sp(act, 17));
+            Icon.pinCenter(b, icons[i], 17);
             b.setGravity(Gravity.CENTER);
             b.setBackground(Ui.ripple(Ui.round(Color.TRANSPARENT, Ui.dpi(act, 10)), t.alpha(t.textPri, 0.12f)));
             b.setOnClickListener(v -> acts[idx].run());

@@ -122,6 +122,10 @@ public class Prefs {
     public float ttsSpeed() { return sp.getFloat("ttsSpeed", 1.0f); }
     public void ttsSpeed(float v) { sp.edit().putFloat("ttsSpeed", v).apply(); }
 
+    /** 自动语音：AI 每句回复生成完成后自动朗读 */
+    public boolean autoTts() { return sp.getBoolean("autoTts", false); }
+    public void autoTts(boolean v) { sp.edit().putBoolean("autoTts", v).apply(); }
+
 
     public int activeKeyIndex() { return sp.getInt("activeKeyIndex", 0); }
     public void activeKeyIndex(int v) { sp.edit().putInt("activeKeyIndex", v).apply(); }
