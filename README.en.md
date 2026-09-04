@@ -2,7 +2,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/version-1.6.0-blue)](AndroidManifest.xml)
+[![Version](https://img.shields.io/badge/version-1.8.1-blue)](AndroidManifest.xml)
 [![Platform](https://img.shields.io/badge/platform-Android%208.0%2B-green)](#)
 [![License](https://img.shields.io/badge/license-MIT-orange)](LICENSE)
 [![Language](https://img.shields.io/badge/language-Java-4e8ee8)](#)
@@ -12,23 +12,29 @@
 </div>
 
 An **AI Chat Application** running on Android (Local Ollama / OpenAI-compatible Cloud APIs / Ollama Official Cloud),
-featuring an Agent tool loop, hot-pluggable plugin system, MCP client, skills and persona systems.
+featuring an Agent tool loop, hot-pluggable plugin system, MCP client, browser automation, vision, skills and persona systems.
 
 ## ✨ Features
 
 - 🤖 **Three model sources**: Local Ollama, OpenAI-compatible cloud APIs, Ollama official cloud
-- 🔄 **Agent tool loop**: AI autonomously invokes tools like file, command, web, skills, MCP, and plugin management
+- 🔄 **Agent tool loop**: AI autonomously invokes tools like file, command, web, browser automation, vision, skills, MCP, and plugin management
+- 🌐 **Browser automation & vision**: AI can autonomously drive the in-app browser — open / extract text / simulate mouse clicks & keyboard input / scroll / run JS / screenshot; screenshots can be sent to a vision model for understanding, then continue operating by coordinates, forming a "see → click" loop
+- 🛡 **Anti-bot countermeasures**: disguised real Chrome mobile UA, disabled automation flags, cookie/localStorage session persistence, per-page anti-fingerprint injection (erase webdriver traces, etc.)
 - 🧩 **Hot-pluggable plugin system**: Declarative UI JSON → native Views; install/uninstall/enable/disable on the fly, no recompilation
 - 🔌 **MCP client**: Streamable HTTP protocol support to connect external MCP servers and extend capabilities
 - 🧠 **Long-term memory**: drawer-nested categorized storage; AI can read/write/search/manage (mem_* tools + memory skill + dedicated page)
 - 🎭 **Skills & personas**: Inject custom system prompts and persona cards to shape AI behavior
+- 🖼 **Persona avatars**: upload an image and crop it to a square in-app (aspect-ratio preserved, no stretching); AI bubble and empty state follow the persona
+- ✋ **Bubble text selection**: long-press for a message menu + a standalone full-screen text-selection panel (smooth copy / select-all)
+- 🔊 **Text-to-speech (TTS)**: Edge free / HTTP API dual channels, auto-read replies
+- 🎨 **Flat vector icons**: emoji replaced with a unified Material Design icon set, theme-tinted
 - 🛠 **Built-in workbench**: Code editor, terminal, browser, and conversation management
 - 💾 **Conversation persistence**: Multi-model message serialization for seamless resume
 
 ## 📦 Version Info
 
-- versionName: **1.6.0**
-- versionCode: **20**
+- versionName: **1.8.1**
+- versionCode: **23**
 - minSdk: **26** (Android 8.0) · targetSdk: **35**
 
 ## 🏗 Architecture Overview
@@ -36,7 +42,11 @@ featuring an Agent tool loop, hot-pluggable plugin system, MCP client, skills an
 | File | Responsibility |
 |------|----------------|
 | `ChatPage.java` | Chat engine / Agent loop (tool-driven autonomous execution) |
-| `LocalTools.java` | Built-in tools (file, command, web, skills, MCP, plugin management) |
+| `LocalTools.java` | Built-in tools (file, command, web, browser automation, vision, skills, MCP, plugin management) |
+| `WebPage.java` | In-app browser + automation host (evalJs / screenshot / anti-bot fingerprint) |
+| `Icon.java` | Flat vector icon library (Material path + custom SVG path parser) |
+| `AvatarCropView.java` | Persona avatar square-crop view (drag / zoom / aspect-ratio preserved) |
+| `TtsEngine.java` | Text-to-speech engine (Edge free / HTTP API) |
 | `Plugins.java` + `PluginUI.java` + `PluginPage.java` + `PluginToolExec.java` | Hot-pluggable plugin system |
 | `McpClient.java` / `Mcps.java` | MCP Streamable HTTP client |
 | `Ollama.java` / `Cloud.java` | Local Ollama and cloud OpenAI-compatible protocols |
@@ -85,7 +95,7 @@ package & align → apksigner sign & verify. Output: `Ollamaster.apk`.
 
 ```
 source/
-├── src/                  # Java source (com.ollamaster package, 31 files)
+├── src/                  # Java source (com.ollamaster package, 36 files)
 ├── res/                  # Android resources
 ├── docs/                 # Design docs
 ├── AndroidManifest.xml   # App manifest

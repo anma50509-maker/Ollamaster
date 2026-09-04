@@ -2,7 +2,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/version-1.6.0-blue)](AndroidManifest.xml)
+[![Version](https://img.shields.io/badge/version-1.8.1-blue)](AndroidManifest.xml)
 [![Platform](https://img.shields.io/badge/platform-Android%208.0%2B-green)](#)
 [![License](https://img.shields.io/badge/license-MIT-orange)](LICENSE)
 [![Language](https://img.shields.io/badge/language-Java-4e8ee8)](#)
@@ -12,23 +12,29 @@
 </div>
 
 运行在 Android 上的 **AI 对话应用**（本地 Ollama / 云端 OpenAI 兼容接口 / Ollama 官方云），
-带 Agent 工具循环、热插拔插件系统、MCP 客户端、技能与人格系统。
+带 Agent 工具循环、热插拔插件系统、MCP 客户端、浏览器自动化、视觉理解、技能与人格系统。
 
 ## ✨ 功能特性
 
 - 🤖 **三种模型源**：本地 Ollama、云端 OpenAI 兼容接口、Ollama 官方云
-- 🔄 **Agent 工具循环**：AI 可自主调用文件、命令、网页、技能、MCP、插件管理等工具
+- 🔄 **Agent 工具循环**：AI 可自主调用文件、命令、网页、浏览器自动化、视觉理解、技能、MCP、插件管理等工具
+- 🌐 **浏览器自动化与视觉操作**：AI 可自主操作应用内浏览器——打开/提取文本/模拟鼠标点击与键盘输入/滚动/执行 JS/截图；截图可交给视觉模型理解后按坐标继续操作，形成「看图→点击」闭环
+- 🛡 **反爬虫对抗**：伪装真实 Chrome 移动端 UA、关闭自动化特征、cookie/localStorage 会话持久化、每页注入反指纹脚本（抹除 webdriver 痕迹等）
 - 🧩 **热插拔插件系统**：声明式 UI JSON → 原生 View，一键安装/卸载/启用/禁用，无需重新编译
 - 🔌 **MCP 客户端**：支持 Streamable HTTP 协议，连接外部 MCP 服务器扩展能力
 - 🧠 **长期记忆库**：抽屉式嵌套分类存储，AI 可读/写/检索/管理（mem_* 工具 + 记忆库技能 + 专属页面）
 - 🎭 **技能与人格系统**：自定义注入系统提示与人设卡，塑造 AI 行为
+- 🖼 **人设头像**：上传图片并应用内方形裁剪（保持比例不拉伸），AI 气泡与空状态跟随人设显示
+- ✋ **气泡文本选择**：长按弹消息菜单 + 独立全屏文本选择面板（顺滑复制/全选）
+- 🔊 **语音合成（TTS）**：Edge 免费 / HTTP API 双通道，自动朗读回复
+- 🎨 **扁平矢量图标**：统一替换 emoji，Material Design 风格，随主题着色
 - 🛠 **内置工作台**：代码编辑、终端、浏览器、会话管理一应俱全
 - 💾 **会话持久化**：多模型消息序列化存储，随时续聊
 
 ## 📦 版本信息
 
-- versionName: **1.6.0**
-- versionCode: **20**
+- versionName: **1.8.1**
+- versionCode: **23**
 - minSdk: **26** (Android 8.0) · targetSdk: **35**
 
 ## 🏗 架构速览
@@ -36,7 +42,11 @@
 | 文件 | 职责 |
 |------|------|
 | `ChatPage.java` | 对话引擎 / Agent 循环（工具调用驱动自主执行） |
-| `LocalTools.java` | 内置工具（文件、命令、网页、技能、MCP、插件管理） |
+| `LocalTools.java` | 内置工具（文件、命令、网页、浏览器自动化、视觉理解、技能、MCP、插件管理） |
+| `WebPage.java` | 内置浏览器 + 自动化宿主（evalJs / 截图 / 反爬虫指纹） |
+| `Icon.java` | 扁平矢量图标库（Material path + 自研 SVG Path 解析器） |
+| `AvatarCropView.java` | 人设头像方形裁剪视图（拖动 / 缩放 / 保持比例） |
+| `TtsEngine.java` | 语音合成引擎（Edge 免费 / HTTP API） |
 | `Plugins.java` + `PluginUI.java` + `PluginPage.java` + `PluginToolExec.java` | 热插拔插件系统 |
 | `McpClient.java` / `Mcps.java` | MCP Streamable HTTP 客户端 |
 | `Ollama.java` / `Cloud.java` | 本地 Ollama 与云端 OpenAI 兼容协议 |
@@ -84,7 +94,7 @@ zip 打包对齐 → apksigner 签名验证。产物输出为 `Ollamaster.apk`�
 
 ```
 source/
-├── src/                  # Java 源码（com.ollamaster 包，31 个文件）
+├── src/                  # Java 源码（com.ollamaster 包，36 个文件）
 ├── res/                  # Android 资源
 ├── docs/                 # 设计文档
 ├── AndroidManifest.xml   # 应用清单
