@@ -1068,14 +1068,11 @@ public class LocalTools {
                 // 异步模式（如 ModelScope）：响应含 task_id，需轮询任务结果
                 String taskId = j.optString("task_id", "");
                 if (!taskId.isEmpty()) {
-                    String taskStatus = j.optString("task_status", "");
-                    // 任务可能已完成（SUCCEED），也可能仍在处理（PENDING/RUNNING）
-                    int maxPoll = 24;  // 最多 24 次 × 5 秒 = 120 秒
+                    // 注意：提交响应的 task_status=SUCCEED 仅表示「已受理」，不代表真正完成，
+                    // 必须轮询到任务查询接口也返回 SUCCEED 才算完成（否则会拿不到图片 URL）
+                    String taskStatus = "";
+                    int maxPoll = 60;  // 最多 60 次 × 5 秒 = 300 秒（5 分钟，ModelScope 免费排队可达 2-4 分钟）
                     for (int poll = 0; poll < maxPoll; poll++) {
-                        if ("SUCCEED".equals(taskStatus) || "SUCCESS".equals(taskStatus)) break;
-                        if ("FAILED".equals(taskStatus) || "ERROR".equals(taskStatus)) {
-                            return "生图任务失败：" + trunc(r.body, 300);
-                        }
                         try { Thread.sleep(5000); } catch (InterruptedException ie) { break; }
                         String taskEp = url.replaceAll("/images/generations$", "")
                                 .replaceAll("/+$", "") + "/tasks/" + taskId;
@@ -1084,8 +1081,13 @@ public class LocalTools {
                         taskHdr.put("X-ModelScope-Task-Type", "image_generation");
                         Http.Resp tr = Http.get(taskEp, taskHdr, 30000);
                         if (tr.code != 200) return "查询生图任务失败(" + tr.code + ")：" + trunc(tr.body, 300);
-                        JSONObject tj = new JSONObject(tr.body);
+                        JSONObject tj;
+                        try { tj = new JSONObject(tr.body); }
+                        catch (Exception je) { continue; }
                         taskStatus = tj.optString("task_status", "");
+                        if ("FAILED".equals(taskStatus) || "ERROR".equals(taskStatus)) {
+                            return "生图任务失败：" + trunc(tr.body, 300);
+                        }
                         if ("SUCCEED".equals(taskStatus) || "SUCCESS".equals(taskStatus)) {
                             // ModelScope: output_images 字符串数组
                             JSONArray outImgs = tj.optJSONArray("output_images");
@@ -1114,7 +1116,11 @@ public class LocalTools {
                         }
                     }
                     if (urlOut == null || urlOut.isEmpty()) {
-                        return "生图任务完成但未获取到图片 URL：" + trunc(r.body, 300);
+                        if ("SUCCEED".equals(taskStatus) || "SUCCESS".equals(taskStatus)) {
+                            return "生图任务已成功但响应未包含图片 URL，请用相同 prompt 重试：" + trunc(r.body, 300);
+                        }
+                        return "生图任务仍在处理中（排队较长），已等待约 5 分钟。任务ID=" + taskId
+                                + "，可用相同 prompt 重试一次。";
                     }
                 } else {
                     return "生图失败：响应无 data 且无 task_id：" + trunc(r.body, 300);
