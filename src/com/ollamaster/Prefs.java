@@ -150,6 +150,11 @@ public class Prefs {
     public String imgDir() { return sp.getString("imgDir", "images"); }
     public void imgDir(String v) { sp.edit().putString("imgDir", v).apply(); }
 
+    /** 视觉模型：web_vision 使用的模型 ID。为空时回退到 activeModel/activeCloudModel
+     *  可以设为和 imgModel 相同的值，让同一个模型同时负责生图和看图的智能体能力 */
+    public String imgVisionModel() { return sp.getString("imgVisionModel", ""); }
+    public void imgVisionModel(String v) { sp.edit().putString("imgVisionModel", v).apply(); }
+
     // ===== AI 自主会话命名 =====
     public boolean autoTitle() { return sp.getBoolean("autoTitle", true); }
     public void autoTitle(boolean v) { sp.edit().putBoolean("autoTitle", v).apply(); }

@@ -91,7 +91,7 @@ public class LocalTools {
                 null, null, null));
         out.put(fn2("get_setting", "读取单个设置项的当前值",
                 new String[]{"key"}, new String[]{"设置键名，如 temperature / ttsMode / autoTts"}, new String[]{"key"}));
-        out.put(fn2("set_setting", "修改应用设置（AI 自行配置入口）。支持键：host,port,timeoutSec,retryMax,editMode,themeName,customTheme,fontScale,stream,showThink,streamDiag,temperature,topP,maxTokens,ctxMsgs,summaryKb,sysPrompt,cloudMode,cloudUrl,cloudKey,cloudModels,activeModel,activeCloudModel,ttsMode,ttsUrl,ttsKey,ttsModel,ttsVoice,ttsSpeed,autoTts,activeKeyIndex,apiKeyPool,workspace,imgEnabled,imgUrl,imgKey,imgModel,imgSize,imgStyle,imgDir,autoTitle",
+        out.put(fn2("set_setting", "修改应用设置（AI 自行配置入口）。支持键：host,port,timeoutSec,retryMax,editMode,themeName,customTheme,fontScale,stream,showThink,streamDiag,temperature,topP,maxTokens,ctxMsgs,summaryKb,sysPrompt,cloudMode,cloudUrl,cloudKey,cloudModels,activeModel,activeCloudModel,ttsMode,ttsUrl,ttsKey,ttsModel,ttsVoice,ttsSpeed,autoTts,activeKeyIndex,apiKeyPool,workspace,imgEnabled,imgUrl,imgKey,imgModel,imgSize,imgStyle,imgDir,imgVisionModel,autoTitle",
                 new String[]{"key", "value"},
                 new String[]{"设置键名（见描述）", "设置值：布尔用 true/false，数字用数值，字符串直接填写"},
                 new String[]{"key", "value"}));
@@ -333,6 +333,7 @@ public class LocalTools {
         sb.append("imgSize = ").append(p.imgSize()).append("\n");
         sb.append("imgStyle = ").append(p.imgStyle().isEmpty() ? "(空)" : p.imgStyle()).append("\n");
         sb.append("imgDir = ").append(p.imgDir()).append("（生图输出目录，相对工作区）\n");
+        sb.append("imgVisionModel = ").append(p.imgVisionModel().isEmpty() ? "(自动)" : p.imgVisionModel()).append("（视觉模型，空则用 activeModel/activeCloudModel）\n");
         sb.append("autoTitle = ").append(p.autoTitle()).append("（AI 自主会话命名）\n");
         return sb.toString();
     }
@@ -382,6 +383,7 @@ public class LocalTools {
             case "imgSize": return "imgSize = " + p.imgSize();
             case "imgStyle": return "imgStyle = " + (p.imgStyle().isEmpty() ? "(空)" : p.imgStyle());
             case "imgDir": return "imgDir = " + p.imgDir();
+            case "imgVisionModel": return "imgVisionModel = " + (p.imgVisionModel().isEmpty() ? "(自动)" : p.imgVisionModel());
             case "autoTitle": return "autoTitle = " + p.autoTitle();
             default: throw new Exception("未知设置键: " + k + "（可用 list_settings 查看全部）");
         }
@@ -436,6 +438,7 @@ public class LocalTools {
             case "imgSize": p.imgSize(v); break;
             case "imgStyle": p.imgStyle(v); break;
             case "imgDir": p.imgDir(v); break;
+            case "imgVisionModel": p.imgVisionModel(v); break;
             case "autoTitle": p.autoTitle(parseBool(v, "autoTitle")); break;
             default: throw new Exception("未知设置键: " + k + "（可用 list_settings 查看全部）");
         }
@@ -974,13 +977,17 @@ public class LocalTools {
                     n == buf.length ? buf : java.util.Arrays.copyOf(buf, n), android.util.Base64.NO_WRAP);
         }
         Prefs p = Prefs.get(act);
-        String model = p.cloudMode()
-                ? (p.activeCloudModel().isEmpty() ? p.cloudModels().split("[,，]")[0].trim() : p.activeCloudModel())
-                : (p.activeModel().isEmpty() ? "llava" : p.activeModel());
+        // 优先使用 imgVisionModel 配置，支持与生图模型相同
+        String visionModel = p.imgVisionModel().trim();
+        if (visionModel.isEmpty()) {
+            visionModel = p.cloudMode()
+                    ? (p.activeCloudModel().isEmpty() ? p.cloudModels().split("[,，]")[0].trim() : p.activeCloudModel())
+                    : (p.activeModel().isEmpty() ? "llava" : p.activeModel());
+        }
         int timeout = Math.max(p.timeoutSec(), 30) * 1000;
         if (p.cloudMode()) {
             JSONObject body = new JSONObject();
-            body.put("model", model);
+            body.put("model", visionModel);
             body.put("stream", false);
             body.put("max_tokens", 512);
             JSONObject c1 = new JSONObject(); c1.put("type", "text"); c1.put("text", q);
@@ -1005,7 +1012,7 @@ public class LocalTools {
             um.attaches.add(f.getAbsolutePath());
             java.util.List<ConvStore.Msg> msgs = new java.util.ArrayList<>();
             msgs.add(um);
-            String body = Ollama.buildChatBody(model, msgs, false, null, p);
+            String body = Ollama.buildChatBody(visionModel, msgs, false, null, p);
             Http.Resp r = Http.post(Ollama.base(p.host(), p.port()) + "/api/chat", body, null, timeout);
             if (r.code != 200) return "视觉请求失败(" + r.code + ")：" + trunc(r.body, 300);
             JSONObject j = new JSONObject(r.body);
