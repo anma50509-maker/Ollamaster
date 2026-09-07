@@ -1045,20 +1045,81 @@ public class LocalTools {
             body.put("prompt", prompt);
             body.put("n", 1);
             body.put("size", size);
-            body.put("response_format", "b64_json");
             java.util.Map<String, String> hdr = new java.util.HashMap<>();
             hdr.put("Content-Type", "application/json");
             if (key != null && !key.isEmpty()) hdr.put("Authorization", "Bearer " + key);
+            // ModelScope 异步模式 header（标准 OpenAI 端点会忽略此 header，无害）
+            hdr.put("X-ModelScope-Async-Mode", "true");
             int timeout = Math.max(p.timeoutSec() * 3, 120) * 1000;
             Http.Resp r = Http.post(ep, body.toString(), hdr, timeout);
             if (r.code != 200) return "生图失败(" + r.code + ")：" + trunc(r.body, 300);
 
             JSONObject j = new JSONObject(r.body);
             JSONArray data = j.optJSONArray("data");
-            if (data == null || data.length() == 0) return "生图失败：响应无 data：" + trunc(r.body, 300);
-            JSONObject d0 = data.optJSONObject(0);
-            String b64 = d0 == null ? null : d0.optString("b64_json", "");
-            String urlOut = d0 == null ? null : d0.optString("url", "");
+            String b64 = null;
+            String urlOut = null;
+
+            if (data != null && data.length() > 0) {
+                // 标准 OpenAI 同步响应：data[0].b64_json 或 data[0].url
+                JSONObject d0 = data.optJSONObject(0);
+                b64 = d0 == null ? null : d0.optString("b64_json", "");
+                urlOut = d0 == null ? null : d0.optString("url", "");
+            } else {
+                // 异步模式（如 ModelScope）：响应含 task_id，需轮询任务结果
+                String taskId = j.optString("task_id", "");
+                if (!taskId.isEmpty()) {
+                    String taskStatus = j.optString("task_status", "");
+                    // 任务可能已完成（SUCCEED），也可能仍在处理（PENDING/RUNNING）
+                    int maxPoll = 24;  // 最多 24 次 × 5 秒 = 120 秒
+                    for (int poll = 0; poll < maxPoll; poll++) {
+                        if ("SUCCEED".equals(taskStatus) || "SUCCESS".equals(taskStatus)) break;
+                        if ("FAILED".equals(taskStatus) || "ERROR".equals(taskStatus)) {
+                            return "生图任务失败：" + trunc(r.body, 300);
+                        }
+                        try { Thread.sleep(5000); } catch (InterruptedException ie) { break; }
+                        String taskEp = url.replaceAll("/images/generations$", "")
+                                .replaceAll("/+$", "") + "/tasks/" + taskId;
+                        // ModelScope 任务查询需要 X-ModelScope-Task-Type header
+                        java.util.Map<String, String> taskHdr = new java.util.HashMap<>(hdr);
+                        taskHdr.put("X-ModelScope-Task-Type", "image_generation");
+                        Http.Resp tr = Http.get(taskEp, taskHdr, 30000);
+                        if (tr.code != 200) return "查询生图任务失败(" + tr.code + ")：" + trunc(tr.body, 300);
+                        JSONObject tj = new JSONObject(tr.body);
+                        taskStatus = tj.optString("task_status", "");
+                        if ("SUCCEED".equals(taskStatus) || "SUCCESS".equals(taskStatus)) {
+                            // ModelScope: output_images 字符串数组
+                            JSONArray outImgs = tj.optJSONArray("output_images");
+                            if (outImgs != null && outImgs.length() > 0) {
+                                urlOut = outImgs.optString(0, "");
+                            }
+                            // 标准 OpenAI: data[0].url
+                            if ((urlOut == null || urlOut.isEmpty()) && tj.optJSONArray("data") != null) {
+                                JSONArray td = tj.optJSONArray("data");
+                                JSONObject d0 = td.optJSONObject(0);
+                                urlOut = d0 == null ? null : d0.optString("url", "");
+                            }
+                            // 其他格式: output.images[0].url 或 output.url
+                            if (urlOut == null || urlOut.isEmpty()) {
+                                JSONObject output = tj.optJSONObject("output");
+                                if (output != null) {
+                                    JSONArray imgs = output.optJSONArray("images");
+                                    if (imgs != null && imgs.length() > 0) {
+                                        JSONObject img0 = imgs.optJSONObject(0);
+                                        urlOut = img0 == null ? imgs.optString(0, "") : img0.optString("url", "");
+                                    }
+                                    if (urlOut == null || urlOut.isEmpty()) urlOut = output.optString("url", "");
+                                }
+                            }
+                            break;
+                        }
+                    }
+                    if (urlOut == null || urlOut.isEmpty()) {
+                        return "生图任务完成但未获取到图片 URL：" + trunc(r.body, 300);
+                    }
+                } else {
+                    return "生图失败：响应无 data 且无 task_id：" + trunc(r.body, 300);
+                }
+            }
 
             String dirRel = p.imgDir().trim();
             if (dirRel.isEmpty()) dirRel = "images";
