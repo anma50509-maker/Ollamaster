@@ -91,7 +91,7 @@ public class LocalTools {
                 null, null, null));
         out.put(fn2("get_setting", "读取单个设置项的当前值",
                 new String[]{"key"}, new String[]{"设置键名，如 temperature / ttsMode / autoTts"}, new String[]{"key"}));
-        out.put(fn2("set_setting", "修改应用设置（AI 自行配置入口）。支持键：host,port,timeoutSec,retryMax,editMode,themeName,customTheme,fontScale,stream,showThink,streamDiag,temperature,topP,maxTokens,ctxMsgs,summaryKb,sysPrompt,cloudMode,cloudUrl,cloudKey,cloudModels,activeModel,activeCloudModel,ttsMode,ttsUrl,ttsKey,ttsModel,ttsVoice,ttsSpeed,autoTts,activeKeyIndex,apiKeyPool,workspace",
+        out.put(fn2("set_setting", "修改应用设置（AI 自行配置入口）。支持键：host,port,timeoutSec,retryMax,editMode,themeName,customTheme,fontScale,stream,showThink,streamDiag,temperature,topP,maxTokens,ctxMsgs,summaryKb,sysPrompt,cloudMode,cloudUrl,cloudKey,cloudModels,activeModel,activeCloudModel,ttsMode,ttsUrl,ttsKey,ttsModel,ttsVoice,ttsSpeed,autoTts,activeKeyIndex,apiKeyPool,workspace,imgEnabled,imgUrl,imgKey,imgModel,imgSize,imgStyle,imgDir,autoTitle",
                 new String[]{"key", "value"},
                 new String[]{"设置键名（见描述）", "设置值：布尔用 true/false，数字用数值，字符串直接填写"},
                 new String[]{"key", "value"}));
@@ -127,6 +127,15 @@ public class LocalTools {
                 new String[]{"path", "question"},
                 new String[]{"图片文件路径（browser_screenshot 的输出）", "要问的问题（可要求给出可点击元素坐标）"},
                 new String[]{"path"}));
+        out.put(fn2("image_generate", "AI 自主生图：调用设置中配置的生图 AI（OpenAI 兼容 images/generations 接口）生成图片，保存到工作区 images/ 目录并返回文件路径。生成前先确认已配置生图接口（设置→生图 AI），未配置则返回提示",
+                new String[]{"prompt", "size", "style", "out"},
+                new String[]{"图片描述 prompt（必填，尽量详细：主体、环境、构图、光影、画风）", "尺寸，如 1024x1024 / 512x512 / 768x1024，留空用默认", "风格附加词（如 赛博朋克、水彩、写实摄影），附加到 prompt 尾部，可空", "输出文件名（可空，默认自动时间戳 gen_xxx.png）"},
+                new String[]{"prompt"}));
+        out.put(fn2("rename_conv", "AI 自主会话命名：为当前会话设置一个有意义的标题（如「修 bug」「写简历」「数据分析」），简洁中文，不超过 18 字。仅当前会话生效",
+                new String[]{"title"},
+                new String[]{"新会话标题，简洁中文，不超过 18 字"},
+                new String[]{"title"}));
+
         } catch (Exception ignored) {}
         return out;
     }
@@ -213,6 +222,7 @@ public class LocalTools {
             case "browser_click": case "browser_type": case "browser_scroll":
             case "browser_back": case "browser_eval": case "browser_screenshot":
             case "browser_ua": case "web_vision":
+            case "image_generate": case "rename_conv":
                 return true;
             default:
                 return false;
@@ -265,6 +275,8 @@ public class LocalTools {
             case "browser_screenshot": return browserScreenshot(args);
             case "browser_ua": return browserUa(args);
             case "web_vision": return webVision(args);
+            case "image_generate": return imageGenerate(args);
+            case "rename_conv": return renameConv(args);
             default: throw new Exception("未知工具: " + name);
         }
     }
@@ -314,6 +326,14 @@ public class LocalTools {
         sb.append("activeKeyIndex = ").append(p.activeKeyIndex()).append("\n");
         sb.append("apiKeyPool = ").append(p.apiKeyPool()).append("\n");
         sb.append("workspace = ").append(p.workspace()).append("\n");
+        sb.append("imgEnabled = ").append(p.imgEnabled()).append("（生图 AI 开关）\n");
+        sb.append("imgUrl = ").append(p.imgUrl()).append("\n");
+        sb.append("imgKey = ").append(p.imgKey().isEmpty() ? "(未设置)" : "••••已设置").append("\n");
+        sb.append("imgModel = ").append(p.imgModel()).append("\n");
+        sb.append("imgSize = ").append(p.imgSize()).append("\n");
+        sb.append("imgStyle = ").append(p.imgStyle().isEmpty() ? "(空)" : p.imgStyle()).append("\n");
+        sb.append("imgDir = ").append(p.imgDir()).append("（生图输出目录，相对工作区）\n");
+        sb.append("autoTitle = ").append(p.autoTitle()).append("（AI 自主会话命名）\n");
         return sb.toString();
     }
 
@@ -355,6 +375,14 @@ public class LocalTools {
             case "activeKeyIndex": return "activeKeyIndex = " + p.activeKeyIndex();
             case "apiKeyPool": return "apiKeyPool = " + p.apiKeyPool();
             case "workspace": return "workspace = " + p.workspace();
+            case "imgEnabled": return "imgEnabled = " + p.imgEnabled();
+            case "imgUrl": return "imgUrl = " + p.imgUrl();
+            case "imgKey": return "imgKey = " + (p.imgKey().isEmpty() ? "(未设置)" : "••••已设置");
+            case "imgModel": return "imgModel = " + p.imgModel();
+            case "imgSize": return "imgSize = " + p.imgSize();
+            case "imgStyle": return "imgStyle = " + (p.imgStyle().isEmpty() ? "(空)" : p.imgStyle());
+            case "imgDir": return "imgDir = " + p.imgDir();
+            case "autoTitle": return "autoTitle = " + p.autoTitle();
             default: throw new Exception("未知设置键: " + k + "（可用 list_settings 查看全部）");
         }
     }
@@ -401,6 +429,14 @@ public class LocalTools {
             case "activeKeyIndex": p.activeKeyIndex(parseInt(v, "activeKeyIndex")); break;
             case "apiKeyPool": p.apiKeyPool(v); break;
             case "workspace": p.workspace(v); break;
+            case "imgEnabled": p.imgEnabled(parseBool(v, "imgEnabled")); break;
+            case "imgUrl": p.imgUrl(v); break;
+            case "imgKey": p.imgKey(v); break;
+            case "imgModel": p.imgModel(v); break;
+            case "imgSize": p.imgSize(v); break;
+            case "imgStyle": p.imgStyle(v); break;
+            case "imgDir": p.imgDir(v); break;
+            case "autoTitle": p.autoTitle(parseBool(v, "autoTitle")); break;
             default: throw new Exception("未知设置键: " + k + "（可用 list_settings 查看全部）");
         }
         Ui.H.post(() -> {
@@ -976,5 +1012,105 @@ public class LocalTools {
             JSONObject mm = j.optJSONObject("message");
             return "视觉理解：\n" + (mm == null ? trunc(r.body, 600) : mm.optString("content", "（无内容）"));
         }
+    }
+
+    /** AI 自主生图：读取设置中生图配置，调用 OpenAI 兼容 /images/generations 接口生成图片并保存到工作区 */
+    private static String imageGenerate(JSONObject a) {
+        MainActivity act = MainActivity.instance();
+        if (act == null) return "错误：应用未就绪";
+        try {
+            Prefs p = Prefs.get(act);
+            if (!p.imgEnabled()) {
+                return "生图 AI 未启用：请先在 设置 → 生图 AI 中开启并填写接口地址/密钥/模型（接口需兼容 OpenAI /images/generations）";
+            }
+            String url = p.imgUrl().trim();
+            String key = p.imgKey().trim();
+            String model = p.imgModel().trim();
+            if (url.isEmpty() || model.isEmpty()) {
+                return "生图 AI 配置不完整：接口地址与模型不能为空（设置 → 生图 AI）";
+            }
+            String prompt = a.optString("prompt", "").trim();
+            if (prompt.isEmpty()) throw new Exception("prompt 不能为空");
+            String style = a.optString("style", "").trim();
+            if (style.isEmpty()) style = p.imgStyle().trim();
+            if (!style.isEmpty()) prompt = prompt + "，风格：" + style;
+            String size = a.optString("size", "").trim();
+            if (size.isEmpty()) size = p.imgSize().trim();
+            if (size.isEmpty()) size = "1024x1024";
+
+            String ep = url.endsWith("/images/generations") ? url
+                    : url.replaceAll("/+$", "") + "/images/generations";
+            JSONObject body = new JSONObject();
+            body.put("model", model);
+            body.put("prompt", prompt);
+            body.put("n", 1);
+            body.put("size", size);
+            body.put("response_format", "b64_json");
+            java.util.Map<String, String> hdr = new java.util.HashMap<>();
+            hdr.put("Content-Type", "application/json");
+            if (key != null && !key.isEmpty()) hdr.put("Authorization", "Bearer " + key);
+            int timeout = Math.max(p.timeoutSec() * 3, 120) * 1000;
+            Http.Resp r = Http.post(ep, body.toString(), hdr, timeout);
+            if (r.code != 200) return "生图失败(" + r.code + ")：" + trunc(r.body, 300);
+
+            JSONObject j = new JSONObject(r.body);
+            JSONArray data = j.optJSONArray("data");
+            if (data == null || data.length() == 0) return "生图失败：响应无 data：" + trunc(r.body, 300);
+            JSONObject d0 = data.optJSONObject(0);
+            String b64 = d0 == null ? null : d0.optString("b64_json", "");
+            String urlOut = d0 == null ? null : d0.optString("url", "");
+
+            String dirRel = p.imgDir().trim();
+            if (dirRel.isEmpty()) dirRel = "images";
+            java.io.File dir = resolve(dirRel);
+            if (!dir.exists()) dir.mkdirs();
+            String outName = a.optString("out", "").trim();
+            if (outName.isEmpty()) outName = "gen_" + System.currentTimeMillis() + ".png";
+            if (!outName.endsWith(".png") && !outName.endsWith(".jpg") && !outName.endsWith(".jpeg") && !outName.endsWith(".webp")) {
+                outName = outName + ".png";
+            }
+            java.io.File outF = new java.io.File(dir, outName);
+
+            if (b64 != null && !b64.isEmpty()) {
+                byte[] bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT);
+                java.io.FileOutputStream fo = new java.io.FileOutputStream(outF);
+                fo.write(bytes);
+                fo.close();
+            } else if (urlOut != null && !urlOut.isEmpty()) {
+                // 直接以二进制流下载，避免 Http.readAll 的 UTF-8 解码破坏图片字节
+                java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(urlOut).openConnection();
+                c.setConnectTimeout(60000);
+                c.setReadTimeout(600000);
+                int code = c.getResponseCode();
+                if (code != 200) return "生图成功但下载图片失败(" + code + ")";
+                java.io.InputStream in = c.getInputStream();
+                java.io.FileOutputStream fo = new java.io.FileOutputStream(outF);
+                byte[] buf = new byte[8192];
+                int n;
+                while ((n = in.read(buf)) > 0) fo.write(buf, 0, n);
+                in.close();
+                fo.close();
+                c.disconnect();
+            } else {
+                return "生图失败：响应既无 b64_json 也无 url：" + trunc(r.body, 300);
+            }
+            return "图片已生成并保存：" + outF.getAbsolutePath()
+                    + "\n（可用 read_file 或 web_vision 查看内容，也可继续用其他工具处理）";
+        } catch (Exception e) {
+            return "[生图失败] " + e.getMessage();
+        }
+    }
+
+    /** AI 自主会话命名：重命名当前会话标题 */
+    private static String renameConv(JSONObject a) {
+        MainActivity act = MainActivity.instance();
+        if (act == null) return "错误：应用未就绪";
+        String title = a.optString("title", "").trim();
+        if (title.isEmpty()) return "错误：title 不能为空";
+        if (title.length() > 18) title = title.substring(0, 17) + "…";
+        ChatPage cp = act.chatPage();
+        if (cp == null) return "错误：会话页未就绪";
+        cp.renameConv(title);
+        return "会话已重命名为：「" + title + "」";
     }
 }

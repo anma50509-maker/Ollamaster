@@ -126,6 +126,34 @@ public class Prefs {
     public boolean autoTts() { return sp.getBoolean("autoTts", false); }
     public void autoTts(boolean v) { sp.edit().putBoolean("autoTts", v).apply(); }
 
+    // ===== 生图 AI 配置 =====
+    public boolean imgEnabled() { return sp.getBoolean("imgEnabled", false); }
+    public void imgEnabled(boolean v) { sp.edit().putBoolean("imgEnabled", v).apply(); }
+
+    public String imgUrl() { return sp.getString("imgUrl", "https://api.openai.com/v1"); }
+    public void imgUrl(String v) { sp.edit().putString("imgUrl", v).apply(); }
+
+    public String imgKey() { return sp.getString("imgKey", ""); }
+    public void imgKey(String v) { sp.edit().putString("imgKey", v).apply(); }
+
+    public String imgModel() { return sp.getString("imgModel", "dall-e-3"); }
+    public void imgModel(String v) { sp.edit().putString("imgModel", v).apply(); }
+
+    public String imgSize() { return sp.getString("imgSize", "1024x1024"); }
+    public void imgSize(String v) { sp.edit().putString("imgSize", v).apply(); }
+
+    /** 生图默认风格提示词（可空），附加到每次生图 prompt 尾部 */
+    public String imgStyle() { return sp.getString("imgStyle", ""); }
+    public void imgStyle(String v) { sp.edit().putString("imgStyle", v).apply(); }
+
+    /** 生图输出目录：相对工作区，默认 images/ */
+    public String imgDir() { return sp.getString("imgDir", "images"); }
+    public void imgDir(String v) { sp.edit().putString("imgDir", v).apply(); }
+
+    // ===== AI 自主会话命名 =====
+    public boolean autoTitle() { return sp.getBoolean("autoTitle", true); }
+    public void autoTitle(boolean v) { sp.edit().putBoolean("autoTitle", v).apply(); }
+
 
     public int activeKeyIndex() { return sp.getInt("activeKeyIndex", 0); }
     public void activeKeyIndex(int v) { sp.edit().putInt("activeKeyIndex", v).apply(); }

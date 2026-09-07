@@ -42,6 +42,7 @@ public class SettingsPage extends Page {
         buildThemeSection(root);
         buildChatSection(root);
         buildTtsSection(root);
+        buildImgSection(root);
         buildCloudSection(root);
         buildWorkspaceSection(root);
         buildDataSection(root);
@@ -534,6 +535,87 @@ public class SettingsPage extends Page {
             rowClick(card, "试听", "朗读一段测试文本验证配置", () -> {
                 TtsEngine.get(act).speak("你好，我是 Ollamaster。语音合成功能已就绪。");
                 Ui.toast(act, "正在朗读测试文本…");
+            });
+        }
+    }
+
+    private void buildImgSection(LinearLayout root) {
+        LinearLayout card = section(root, "生图 AI");
+        final Prefs p = Prefs.get(act);
+
+        LinearLayout mr = baseRow(card);
+        rowTitle(mr, "启用生图", "AI 可自主调用 image_generate 工具生成图片");
+        addSwitch(mr, p.imgEnabled(), (b, on) -> {
+            p.imgEnabled(on);
+            if (on && p.imgKey().isEmpty()) Ui.toast(act, "记得填写接口地址与密钥");
+            rebuild();
+        });
+        hair(card);
+
+        if (!p.imgEnabled()) {
+            rowClick(card, "启用说明", "开启后 AI 拥有 image_generate 工具，可在对话中自主生成图片", () -> {
+                Ui.toast(act, "生图 AI 未启用");
+            });
+            hair(card);
+            rowClick(card, "接口地址", p.imgUrl(), () ->
+                    inputDialog("接口地址", "OpenAI 兼容 images/generations 接口，如 https://api.openai.com/v1 或 https://dashscope.aliyuncs.com/compatible-mode/v1",
+                            p.imgUrl(), false, false, s2 -> {
+                                if (!s2.trim().isEmpty()) p.imgUrl(s2.trim());
+                            }));
+            hair(card);
+            rowClick(card, "API 密钥", p.imgKey().isEmpty() ? "未配置" : "••••" +
+                            p.imgKey().substring(Math.max(0, p.imgKey().length() - 4)), () ->
+                    inputDialog("API 密钥", "仅保存在本机", p.imgKey(), false, false, s2 -> p.imgKey(s2.trim())));
+            hair(card);
+            rowClick(card, "模型", p.imgModel(), () ->
+                    inputDialog("模型", "如 dall-e-3 / gpt-image-1 / qwen-image / flux 等", p.imgModel(), false, false, s2 -> {
+                        if (!s2.trim().isEmpty()) p.imgModel(s2.trim());
+                    }));
+            hair(card);
+            rowClick(card, "默认尺寸", p.imgSize(), () ->
+                    inputDialog("默认尺寸", "如 1024x1024 / 512x512 / 768x1024", p.imgSize(), false, false, s2 -> {
+                        if (!s2.trim().isEmpty()) p.imgSize(s2.trim());
+                    }));
+            hair(card);
+            rowClick(card, "默认风格", p.imgStyle().isEmpty() ? "(空)" : p.imgStyle(), () ->
+                    inputDialog("默认风格", "附加到每次生图 prompt 尾部的风格词，如：赛博朋克、水彩、写实摄影", p.imgStyle(), false, false, s2 -> p.imgStyle(s2.trim())));
+            hair(card);
+            rowClick(card, "输出目录", p.imgDir(), () ->
+                    inputDialog("输出目录", "相对工作区，如 images", p.imgDir(), false, false, s2 -> {
+                        if (!s2.trim().isEmpty()) p.imgDir(s2.trim());
+                    }));
+        } else {
+            rowClick(card, "接口地址", p.imgUrl(), () ->
+                    inputDialog("接口地址", "OpenAI 兼容 images/generations 接口，如 https://api.openai.com/v1",
+                            p.imgUrl(), false, false, s2 -> {
+                                if (!s2.trim().isEmpty()) p.imgUrl(s2.trim());
+                            }));
+            hair(card);
+            rowClick(card, "API 密钥", p.imgKey().isEmpty() ? "未配置" : "••••" +
+                            p.imgKey().substring(Math.max(0, p.imgKey().length() - 4)), () ->
+                    inputDialog("API 密钥", "仅保存在本机", p.imgKey(), false, false, s2 -> p.imgKey(s2.trim())));
+            hair(card);
+            rowClick(card, "模型", p.imgModel(), () ->
+                    inputDialog("模型", "如 dall-e-3 / gpt-image-1 / qwen-image / flux 等", p.imgModel(), false, false, s2 -> {
+                        if (!s2.trim().isEmpty()) p.imgModel(s2.trim());
+                    }));
+            hair(card);
+            rowClick(card, "默认尺寸", p.imgSize(), () ->
+                    inputDialog("默认尺寸", "如 1024x1024 / 512x512 / 768x1024", p.imgSize(), false, false, s2 -> {
+                        if (!s2.trim().isEmpty()) p.imgSize(s2.trim());
+                    }));
+            hair(card);
+            rowClick(card, "默认风格", p.imgStyle().isEmpty() ? "(空)" : p.imgStyle(), () ->
+                    inputDialog("默认风格", "附加到每次生图 prompt 尾部的风格词", p.imgStyle(), false, false, s2 -> p.imgStyle(s2.trim())));
+            hair(card);
+            rowClick(card, "输出目录", p.imgDir(), () ->
+                    inputDialog("输出目录", "相对工作区，如 images", p.imgDir(), false, false, s2 -> {
+                        if (!s2.trim().isEmpty()) p.imgDir(s2.trim());
+                    }));
+            hair(card);
+            rowClick(card, "AI 自主会话命名", p.autoTitle() ? "开启" : "关闭", () -> {
+                p.autoTitle(!p.autoTitle());
+                rebuild();
             });
         }
     }

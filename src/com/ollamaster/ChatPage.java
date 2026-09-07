@@ -123,6 +123,8 @@ public class ChatPage extends Page {
     private volatile boolean truncated;
     private long summaryFailAt = 0;
     private Runnable retryRun;
+    /** AI 自主命名待触发标志：新会话首条消息后置 true，AI 命名完成或手动重命名后置 false */
+    private boolean titleAutoPending = false;
     /** 刷新去重标志：网络线程标记、UI 线程清除，必须 volatile 否则网络线程会读到过期值导致刷新停摆 */
     private volatile boolean flushPending;
     /** 上次渲染进气泡的文本，内容未变时跳过 setText 避免无效布局 */
@@ -708,6 +710,7 @@ public class ChatPage extends Page {
     private void newConv() {
         stopStream(false);
         conv = null;
+        titleAutoPending = false;
         persona = null;
         pendingAttaches.clear();
         renderAttachChips();
@@ -719,6 +722,7 @@ public class ChatPage extends Page {
     private void loadConv(ConvStore.Conv c) {
         stopStream(false);
         conv = c;
+        titleAutoPending = false;
         model = c.model == null || c.model.isEmpty() ? model : c.model;
         for (Personas.P p : personas) if (p.id.equals(c.personaId)) persona = p;
         pendingAttaches.clear();
@@ -727,6 +731,22 @@ public class ChatPage extends Page {
         updateChips();
         refreshEmpty();
         scrollBottom();
+    }
+
+    /** AI/用户 自主会话命名：重命名当前会话并持久化 */
+    public void renameConv(final String title) {
+        if (conv == null) return;
+        String t = title == null ? "" : title.trim();
+        if (t.isEmpty()) return;
+        if (t.length() > 18) t = t.substring(0, 17) + "…";
+        conv.title = t;
+        titleAutoPending = false;
+        final String shown = t;
+        ConvStore.save(act, conv);
+        Ui.H.post(() -> {
+            if (msgAdapter != null) msgAdapter.notifyDataSetChanged();
+            Ui.toast(act, "会话已命名为：" + shown);
+        });
     }
 
     private void refreshEmpty() {
@@ -1282,6 +1302,106 @@ public class ChatPage extends Page {
         }
     }
 
+    /** AI 自主会话命名：后台线程让当前模型根据对话内容生成简短标题，成功后更新会话标题 */
+    private void autoTitle() {
+        if (conv == null || conv.msgs.size() < 2) return;
+        if (!titleAutoPending) return;
+        new Thread(() -> {
+            try {
+                final String t = titleSync();
+                if (t == null || t.trim().isEmpty()) return;
+                Ui.H.post(() -> {
+                    if (conv == null) return;
+                    renameConv(t.trim());
+                });
+            } catch (Exception ignored) {}
+        }, "om-title").start();
+    }
+
+    /** 请求当前模型为会话生成一个简洁中文标题（独立短请求，不进入对话流） */
+    private String titleSync() {
+        try {
+            final Prefs p = Prefs.get(act);
+            final StringBuilder out = new StringBuilder();
+            final Exception[] err = {null};
+            // 取前 2 轮对话作为命名依据
+            StringBuilder transcript = new StringBuilder();
+            int round = 0;
+            for (ConvStore.Msg m : conv.msgs) {
+                if (round >= 2) break;
+                String role = "user".equals(m.role) ? "用户" : "助手";
+                String body = (m.content == null ? "" : m.content).replace("\n", " ").trim();
+                if (body.isEmpty()) continue;
+                transcript.append(role).append(": ").append(body).append('\n');
+                if ("assistant".equals(m.role)) round++;
+            }
+            if (transcript.length() == 0) return "";
+            String sys = "你是会话标题生成器。根据下面这段对话开头，生成一个简洁的中文会话标题，"
+                    + "概括这段对话的主题/任务，不超过 12 个字。直接输出标题本身，禁止引号、标点、解释或换行。";
+            JSONArray ms = new JSONArray();
+            ms.put(new JSONObject().put("role", "system").put("content", sys));
+            ms.put(new JSONObject().put("role", "user").put("content", transcript.toString()));
+            if (p.cloudMode()) {
+                String useModel = model.isEmpty() ? p.cloudModels().split("[,，]")[0].trim() : model;
+                String sumUrl = p.cloudUrl(), sumKey = p.cloudKey();
+                for (ModelEntry me : modelEntries) {
+                    if (me.name.equals(useModel)) {
+                        if (!me.url.isEmpty()) sumUrl = me.url;
+                        if (!me.key.isEmpty()) sumKey = me.key;
+                        break;
+                    }
+                }
+                JSONObject body = new JSONObject();
+                body.put("model", useModel);
+                body.put("stream", true);
+                body.put("temperature", 0.3);
+                body.put("max_tokens", 32);
+                body.put("messages", ms);
+                Cloud.chat(sumUrl, sumKey, body.toString(), new Http.Cancel(), new Cloud.ChatCb() {
+                    @Override public void delta(String t) { if (out.length() < 60) out.append(t); }
+                    @Override public void assistantMsg(String s, String tj, String r) {}
+                    @Override public void error(Exception e) { err[0] = e; }
+                    @Override public void done() {}
+                }, p.timeoutSec() * 1000);
+            } else {
+                if (model == null || model.isEmpty()) return "";
+                JSONObject body = new JSONObject();
+                body.put("model", model);
+                body.put("stream", true);
+                JSONObject opt = new JSONObject();
+                opt.put("temperature", 0.3);
+                opt.put("num_predict", 32);
+                body.put("options", opt);
+                body.put("messages", ms);
+                Ollama.chat(p.host(), p.port(), body.toString(), new Http.Cancel(), new Ollama.ChatCb() {
+                    @Override public void delta(String t) { if (out.length() < 60) out.append(t); }
+                    @Override public void meta(long e, long d) {}
+                    @Override public ConvStore.Msg assistantMsg(String s, JSONObject raw) { return null; }
+                    @Override public void error(Exception e) { err[0] = e; }
+                    @Override public void done() {}
+                }, p.timeoutSec() * 1000);
+            }
+            if (err[0] != null) return "";
+            String t = out.toString().trim();
+            // 去掉标题首尾的引号与标点（保留中间字符）
+            int sl = t.length();
+            while (sl > 0) {
+                char c = t.charAt(sl - 1);
+                if (c == '"' || c == '\'' || c == '”' || c == '’' || c == '。'
+                        || c == '，' || c == ',' || c == '.' || c == '!' || c == '！'
+                        || c == '?' || c == '？' || c == ':' || c == '：' || c == ';'
+                        || c == '；' || c == '《' || c == '》' || c == '【' || c == '】'
+                        || c == '「' || c == '」') sl--;
+                else break;
+            }
+            t = t.substring(0, sl);
+            if (t.length() > 18) t = t.substring(0, 17) + "…";
+            return t;
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
     private void send(String text) {
         ensureConv();
         ArrayList<String> atts = new ArrayList<>(pendingAttaches);
@@ -1290,6 +1410,7 @@ public class ChatPage extends Page {
                     ? attachLabel(atts.get(0))
                     : text.replace('\n', ' ');
             conv.title = t;
+            titleAutoPending = true;  // 等待 AI 自主优化标题
         }
         if (conv.title.length() > 18) conv.title = conv.title.substring(0, 17) + "…";
         ConvStore.Msg um = new ConvStore.Msg("user", text);
@@ -1556,6 +1677,12 @@ public class ChatPage extends Page {
                 runTurn(CONTINUE_HINT, placeholder);
             } else {
                 contDepth = 0;
+                // AI 自主会话命名：一轮完整回复（无工具）且启用时，自动让当前模型为会话起标题
+                if (Prefs.get(act).autoTitle() && conv != null
+                        && titleAutoPending && !streaming) {
+                    titleAutoPending = false;
+                    autoTitle();
+                }
             }
         });
     }
@@ -2511,6 +2638,52 @@ public class ChatPage extends Page {
         w[0].show();
     }
 
+    /** 用户自主编辑会话命名：弹出输入框修改指定会话标题 */
+    private void renameConvDialog(final ConvStore.Conv c, final ListView lv, final List<ConvStore.Conv> all) {
+        t = Theme.of(act);
+        LinearLayout box = new LinearLayout(act);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.addView(Ui.title(act, t, "重命名会话"));
+        box.addView(Ui.gap(act, 5));
+        box.addView(Ui.caption(act, t, "修改后立即生效，标题不超过 18 字"));
+        box.addView(Ui.gap(act, 10));
+        final EditText et = Ui.input(act, t, "会话标题", false);
+        et.setText(c.title);
+        et.requestFocus();
+        box.addView(et);
+        box.addView(Ui.gap(act, 12));
+        LinearLayout btns = new LinearLayout(act);
+        btns.setOrientation(LinearLayout.HORIZONTAL);
+        TextView cancel = Ui.btnGhost(act, t, "取消");
+        TextView ok = Ui.btnPrimary(act, t, "确定");
+        Dialog[] w = new Dialog[1];
+        cancel.setOnClickListener(v -> w[0].dismiss());
+        ok.setOnClickListener(v -> {
+            String name = et.getText().toString().trim();
+            if (name.isEmpty()) {
+                Ui.toast(act, "标题不能为空");
+                return;
+            }
+            if (name.length() > 18) name = name.substring(0, 17) + "…";
+            c.title = name;
+            ConvStore.save(act, c);
+            if (conv != null && conv.id.equals(c.id)) {
+                conv.title = name;
+                ConvStore.save(act, conv);
+            }
+            if (lv.getAdapter() != null) ((BaseAdapter) lv.getAdapter()).notifyDataSetChanged();
+            w[0].dismiss();
+            Ui.toast(act, "已重命名为：" + name);
+        });
+        LinearLayout.LayoutParams l1 = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        l1.rightMargin = Ui.dpi(act, 8);
+        btns.addView(cancel, l1);
+        btns.addView(ok, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        box.addView(btns);
+        w[0] = Ui.sheet(act, box, t);
+        w[0].show();
+    }
+
     private void historySheet() {
         t = Theme.of(act);
         LinearLayout box = new LinearLayout(act);
@@ -2538,6 +2711,8 @@ public class ChatPage extends Page {
                     row.addView(midCol);
                     TextView del = new TextView(act);
                     row.addView(del);
+                    TextView delBtn = new TextView(act);
+                    row.addView(delBtn);
                 }
                 LinearLayout midCol = (LinearLayout) row.getChildAt(0);
                 while (midCol.getChildCount() < 2) {
@@ -2557,10 +2732,17 @@ public class ChatPage extends Page {
                 sub.setTextColor(t.textSec);
                 sub.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 11));
                 TextView del = (TextView) row.getChildAt(1);
-                del.setText("删除");
-                del.setTextColor(t.alpha(t.danger, 0.9f));
+                del.setText("重命名");
+                del.setTextColor(t.accent);
                 del.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 12));
-                del.setOnClickListener(v -> {
+                del.setPadding(Ui.dpi(act, 4), 0, Ui.dpi(act, 4), 0);
+                del.setOnClickListener(v -> renameConvDialog(c, lv, all));
+                TextView delBtn = (TextView) row.getChildAt(2);
+                delBtn.setText("删除");
+                delBtn.setTextColor(t.alpha(t.danger, 0.9f));
+                delBtn.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 12));
+                delBtn.setPadding(Ui.dpi(act, 4), 0, 0, 0);
+                delBtn.setOnClickListener(v -> {
                     ConvStore.delete(act, c.id);
                     if (conv != null && conv.id.equals(c.id)) conv = null;
                     refreshViews();
