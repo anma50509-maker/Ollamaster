@@ -977,12 +977,25 @@ public class LocalTools {
                     n == buf.length ? buf : java.util.Arrays.copyOf(buf, n), android.util.Base64.NO_WRAP);
         }
         Prefs p = Prefs.get(act);
-        // 优先使用 imgVisionModel 配置，支持与生图模型相同
+        // 视觉模型选择优先级：
+        // 1. imgVisionModel 配置（用户明确指定）
+        // 2. activeCloudModel（云端模式下的活跃模型）
+        // 3. cloudModels 第一个（云端默认）
+        // 4. activeModel（本地模式下的活跃模型）
+        // 5. llava（默认兜底）
         String visionModel = p.imgVisionModel().trim();
         if (visionModel.isEmpty()) {
-            visionModel = p.cloudMode()
-                    ? (p.activeCloudModel().isEmpty() ? p.cloudModels().split("[,，]")[0].trim() : p.activeCloudModel())
-                    : (p.activeModel().isEmpty() ? "llava" : p.activeModel());
+            if (p.cloudMode()) {
+                visionModel = p.activeCloudModel().isEmpty() 
+                        ? p.cloudModels().split("[,，]")[0].trim() 
+                        : p.activeCloudModel();
+            } else {
+                visionModel = p.activeModel().isEmpty() ? "llava" : p.activeModel();
+            }
+        }
+        // 最终兜底检查
+        if (visionModel.isEmpty()) {
+            visionModel = "llava";
         }
         int timeout = Math.max(p.timeoutSec(), 30) * 1000;
         if (p.cloudMode()) {
