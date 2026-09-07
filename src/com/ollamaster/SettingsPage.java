@@ -461,6 +461,10 @@ public class SettingsPage extends Page {
                 p.sysPrompt().length() > 30 ? p.sysPrompt().substring(0, 29) + "…" : p.sysPrompt(),
                 () -> inputDialog("全局系统提示词", "附加在所有人设之后的系统指令",
                         p.sysPrompt(), true, false, s -> p.sysPrompt(s)));
+        hair(card);
+        LinearLayout ar = baseRow(card);
+        rowTitle(ar, "AI 自主会话命名", "首轮回复完成后自动生成会话标题");
+        addSwitch(ar, p.autoTitle(), (b, on) -> p.autoTitle(on));
     }
 
     private void buildTtsSection(LinearLayout root) {
@@ -612,11 +616,6 @@ public class SettingsPage extends Page {
                     inputDialog("输出目录", "相对工作区，如 images", p.imgDir(), false, false, s2 -> {
                         if (!s2.trim().isEmpty()) p.imgDir(s2.trim());
                     }));
-            hair(card);
-            rowClick(card, "AI 自主会话命名", p.autoTitle() ? "开启" : "关闭", () -> {
-                p.autoTitle(!p.autoTitle());
-                rebuild();
-            });
         }
     }
 
