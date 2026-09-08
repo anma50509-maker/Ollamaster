@@ -977,14 +977,10 @@ public class ChatPage extends Page {
             ArrayList<String> got = new ArrayList<>();
             try {
                 if (p.cloudMode()) {
-                    // 密钥池：若 activeKeyIndex 指向某个条目（用户已选定服务商），只加载该服务商的模型；
-                    // 否则扫描全部密钥池条目。修复：选了密钥池模型后选择栏仍显示所有平台模型的 bug
-                    int activeIdx = p.activeKeyIndex();
+                    // 始终扫描所有密钥池条目 + 云端配置，选定的模型高亮显示
                     JSONArray pool = new JSONArray(p.apiKeyPool());
-                    boolean useSingle = activeIdx >= 0 && activeIdx < pool.length();
                     try {
                         for (int i = 0; i < pool.length(); i++) {
-                            if (useSingle && i != activeIdx) continue;
                             JSONObject entry = pool.getJSONObject(i);
                             String url = entry.optString("url", "");
                             String key = entry.optString("key", "");
@@ -1006,7 +1002,6 @@ public class ChatPage extends Page {
                                                 }
                                             }
                                         }
-                                        // 兼容 Ollama 原生格式
                                         JSONArray models = j.optJSONArray("models");
                                         if (models != null) {
                                             for (int k = 0; k < models.length(); k++) {
@@ -1033,8 +1028,8 @@ public class ChatPage extends Page {
                             }
                         }
                     } catch (Exception ignored) {}
-                    // 全局 cloudUrl/cloudKey 扫描（仅未选定密钥池条目时合并显示，避免混入其他平台模型）
-                    if (!useSingle) try {
+                    // 始终扫描全局 cloudUrl/cloudKey
+                    try {
                         String body = Cloud.modelsBody(p.cloudUrl(), p.cloudKey(), p.timeoutSec() * 1000);
                         if (body != null) {
                             JSONObject j = new JSONObject(body);
@@ -2390,27 +2385,6 @@ public class ChatPage extends Page {
         Prefs p = Prefs.get(act);
         if (p.cloudMode()) p.activeCloudModel(name);
         else p.activeModel(name);
-        // 记录选中模型来自密钥池哪个条目：loadModels 据此只显示该服务商的模型（修复混显 bug）
-        try {
-            if (p.cloudMode()) {
-                JSONArray pool = new JSONArray(p.apiKeyPool());
-                for (int i = 0; i < pool.length(); i++) {
-                    JSONObject entry = pool.getJSONObject(i);
-                    String url = entry.optString("url", "");
-                    String key = entry.optString("key", "");
-                    if (url.isEmpty()) continue;
-                    // 该条目 url/key 与选中模型的来源一致 → 记住索引
-                    for (ModelEntry me : modelEntries) {
-                        if (me.name.equals(name) && me.url.equals(url) && me.key.equals(key)) {
-                            p.activeKeyIndex(i);
-                            return;
-                        }
-                    }
-                }
-                // 未匹配密钥池条目（手动输入/全局云端）→ 清除单选模式
-                p.activeKeyIndex(-1);
-            }
-        } catch (Exception ignored) {}
         if (conv != null) conv.model = name;
     }
 
