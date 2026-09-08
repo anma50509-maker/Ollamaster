@@ -15,6 +15,18 @@ public class Cloud {
     public static String url(String baseUrl, String path) {
         String b = baseUrl.trim();
         while (b.endsWith("/")) b = b.substring(0, b.length() - 1);
+        // 用户可能把完整端点填进 baseUrl（如 https://x.com/v1/chat/completions），
+        // 自动剥离已知端点路径，还原到 API 根（https://x.com/v1）再拼 path
+        String[] knownPaths = {"/chat/completions", "/completions", "/embeddings",
+                "/images/generations", "/audio/speech", "/audio/transcriptions",
+                "/models", "/responses", "/messages", "/api/chat", "/api/generate"};
+        for (String kp : knownPaths) {
+            if (b.endsWith(kp)) {
+                b = b.substring(0, b.length() - kp.length());
+                break;
+            }
+        }
+        while (b.endsWith("/")) b = b.substring(0, b.length() - 1);
         return b + path;
     }
 
