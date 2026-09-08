@@ -177,7 +177,7 @@ public class Prefs {
     public void autoTitle(boolean v) { sp.edit().putBoolean("autoTitle", v).apply(); }
 
 
-    public int activeKeyIndex() { return sp.getInt("activeKeyIndex", 0); }
+    public int activeKeyIndex() { return sp.getInt("activeKeyIndex", -1); }
     public void activeKeyIndex(int v) { sp.edit().putInt("activeKeyIndex", v).apply(); }
 
     public String apiKeyPool() { return sp.getString("apiKeyPool", "[]"); }
