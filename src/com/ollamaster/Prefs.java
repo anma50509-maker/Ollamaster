@@ -155,6 +155,23 @@ public class Prefs {
     public String imgVisionModel() { return sp.getString("imgVisionModel", ""); }
     public void imgVisionModel(String v) { sp.edit().putString("imgVisionModel", v).apply(); }
 
+    // ===== 视觉模型独立配置（沿用主模型 / 手动独立配置）=====
+    /** 视觉模式：follow=沿用主模型（activeModel/activeCloudModel），manual=手动独立配置 */
+    public String visionMode() { return sp.getString("visionMode", "follow"); }
+    public void visionMode(String v) { sp.edit().putString("visionMode", v).apply(); }
+
+    /** 手动模式下的视觉接口地址（OpenAI 兼容 /chat/completions） */
+    public String visionUrl() { return sp.getString("visionUrl", ""); }
+    public void visionUrl(String v) { sp.edit().putString("visionUrl", v).apply(); }
+
+    /** 手动模式下的视觉 API 密钥 */
+    public String visionKey() { return sp.getString("visionKey", ""); }
+    public void visionKey(String v) { sp.edit().putString("visionKey", v).apply(); }
+
+    /** 手动模式下的视觉模型 ID（如 gpt-4o-mini / qwen2.5-vl-72b 等） */
+    public String visionModelId() { return sp.getString("visionModelId", ""); }
+    public void visionModelId(String v) { sp.edit().putString("visionModelId", v).apply(); }
+
     // ===== AI 自主会话命名 =====
     public boolean autoTitle() { return sp.getBoolean("autoTitle", true); }
     public void autoTitle(boolean v) { sp.edit().putBoolean("autoTitle", v).apply(); }

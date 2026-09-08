@@ -43,6 +43,7 @@ public class SettingsPage extends Page {
         buildChatSection(root);
         buildTtsSection(root);
         buildImgSection(root);
+        buildVisionSection(root);
         buildCloudSection(root);
         buildWorkspaceSection(root);
         buildDataSection(root);
@@ -616,6 +617,57 @@ public class SettingsPage extends Page {
                     inputDialog("输出目录", "相对工作区，如 images", p.imgDir(), false, false, s2 -> {
                         if (!s2.trim().isEmpty()) p.imgDir(s2.trim());
                     }));
+        }
+    }
+
+    /** 视觉模型配置：沿用主模型（默认）或手动独立配置接口/密钥/模型 */
+    private void buildVisionSection(LinearLayout root) {
+        LinearLayout card = section(root, "视觉模型");
+        final Prefs p = Prefs.get(act);
+        boolean manual = "manual".equals(p.visionMode());
+
+        LinearLayout mr = baseRow(card);
+        rowTitle(mr, "配置方式", manual ? "手动配置（独立接口）" : "沿用主模型（推荐）");
+        LinearLayout modeBox = new LinearLayout(act);
+        modeBox.setOrientation(LinearLayout.HORIZONTAL);
+        final LinearLayout btnFollow = modeBtn("沿用主模型", "用当前对话模型看图", !manual);
+        final LinearLayout btnManual = modeBtn("手动配置", "独立接口/密钥", manual);
+        LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(0, Ui.dpi(act, 52), 1f);
+        mlp.rightMargin = Ui.dpi(act, 6);
+        modeBox.addView(btnFollow, mlp);
+        modeBox.addView(btnManual, new LinearLayout.LayoutParams(0, Ui.dpi(act, 52), 1f));
+        mr.addView(modeBox, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        btnFollow.setOnClickListener(v -> { p.visionMode("follow"); rebuild(); });
+        btnManual.setOnClickListener(v -> { p.visionMode("manual"); rebuild(); });
+        hair(card);
+
+        if (!manual) {
+            rowClick(card, "当前视觉模型", "自动跟随对话主模型（云端或本地）", () ->
+                    Ui.toast(act, "视觉请求将使用当前选中的对话模型"));
+            hair(card);
+            rowClick(card, "兼容旧配置", p.imgVisionModel().isEmpty() ? "未设置" : p.imgVisionModel(), () ->
+                    inputDialog("兼容旧视觉模型", "imgVisionModel：非空时优先于主模型（旧版本遗留配置）",
+                            p.imgVisionModel(), false, false, s2 -> p.imgVisionModel(s2.trim())));
+        } else {
+            rowClick(card, "接口地址", p.visionUrl().isEmpty() ? "未配置" : p.visionUrl(), () ->
+                    inputDialog("视觉接口地址", "OpenAI 兼容 /chat/completions 端点，如 https://api.siliconflow.cn/v1",
+                            p.visionUrl(), false, false, s2 -> {
+                                if (!s2.trim().isEmpty()) p.visionUrl(s2.trim());
+                            }));
+            hair(card);
+            rowClick(card, "API 密钥", p.visionKey().isEmpty() ? "未配置" : "••••" +
+                            p.visionKey().substring(Math.max(0, p.visionKey().length() - 4)), () ->
+                    inputDialog("视觉 API 密钥", "仅保存在本机", p.visionKey(), false, false, s2 -> p.visionKey(s2.trim())));
+            hair(card);
+            rowClick(card, "视觉模型 ID", p.visionModelId().isEmpty() ? "未配置" : p.visionModelId(), () ->
+                    inputDialog("视觉模型 ID", "支持图片理解的模型，如 qwen2.5-vl-72b-instruct / gpt-4o-mini / GLM-4.5V",
+                            p.visionModelId(), false, false, s2 -> {
+                                if (!s2.trim().isEmpty()) p.visionModelId(s2.trim());
+                            }));
+            hair(card);
+            rowClick(card, "测试视觉", "用一张生成图验证配置", () -> {
+                Ui.toast(act, "请在对话中让 AI 调用 web_vision 工具测试");
+            });
         }
     }
 

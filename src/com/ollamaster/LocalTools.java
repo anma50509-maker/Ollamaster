@@ -91,7 +91,7 @@ public class LocalTools {
                 null, null, null));
         out.put(fn2("get_setting", "读取单个设置项的当前值",
                 new String[]{"key"}, new String[]{"设置键名，如 temperature / ttsMode / autoTts"}, new String[]{"key"}));
-        out.put(fn2("set_setting", "修改应用设置（AI 自行配置入口）。支持键：host,port,timeoutSec,retryMax,editMode,themeName,customTheme,fontScale,stream,showThink,streamDiag,temperature,topP,maxTokens,ctxMsgs,summaryKb,sysPrompt,cloudMode,cloudUrl,cloudKey,cloudModels,activeModel,activeCloudModel,ttsMode,ttsUrl,ttsKey,ttsModel,ttsVoice,ttsSpeed,autoTts,activeKeyIndex,apiKeyPool,workspace,imgEnabled,imgUrl,imgKey,imgModel,imgSize,imgStyle,imgDir,imgVisionModel,autoTitle",
+        out.put(fn2("set_setting", "修改应用设置（AI 自行配置入口）。支持键：host,port,timeoutSec,retryMax,editMode,themeName,customTheme,fontScale,stream,showThink,streamDiag,temperature,topP,maxTokens,ctxMsgs,summaryKb,sysPrompt,cloudMode,cloudUrl,cloudKey,cloudModels,activeModel,activeCloudModel,ttsMode,ttsUrl,ttsKey,ttsModel,ttsVoice,ttsSpeed,autoTts,activeKeyIndex,apiKeyPool,workspace,imgEnabled,imgUrl,imgKey,imgModel,imgSize,imgStyle,imgDir,imgVisionModel,visionMode,visionUrl,visionKey,visionModelId,autoTitle",
                 new String[]{"key", "value"},
                 new String[]{"设置键名（见描述）", "设置值：布尔用 true/false，数字用数值，字符串直接填写"},
                 new String[]{"key", "value"}));
@@ -333,6 +333,10 @@ public class LocalTools {
         sb.append("imgSize = ").append(p.imgSize()).append("\n");
         sb.append("imgStyle = ").append(p.imgStyle().isEmpty() ? "(空)" : p.imgStyle()).append("\n");
         sb.append("imgDir = ").append(p.imgDir()).append("（生图输出目录，相对工作区）\n");
+        sb.append("visionMode = ").append(p.visionMode()).append("（视觉模式：follow=沿用主模型 / manual=手动独立配置）\n");
+        sb.append("visionUrl = ").append(p.visionUrl().isEmpty() ? "(空)" : p.visionUrl()).append("（手动模式视觉接口地址）\n");
+        sb.append("visionKey = ").append(p.visionKey().isEmpty() ? "(未设置)" : "••••已设置").append("\n");
+        sb.append("visionModelId = ").append(p.visionModelId().isEmpty() ? "(空)" : p.visionModelId()).append("（手动模式视觉模型 ID）\n");
         sb.append("imgVisionModel = ").append(p.imgVisionModel().isEmpty() ? "(自动)" : p.imgVisionModel()).append("（视觉模型，空则用 activeModel/activeCloudModel）\n");
         sb.append("autoTitle = ").append(p.autoTitle()).append("（AI 自主会话命名）\n");
         return sb.toString();
@@ -383,6 +387,10 @@ public class LocalTools {
             case "imgSize": return "imgSize = " + p.imgSize();
             case "imgStyle": return "imgStyle = " + (p.imgStyle().isEmpty() ? "(空)" : p.imgStyle());
             case "imgDir": return "imgDir = " + p.imgDir();
+            case "visionMode": return "visionMode = " + p.visionMode() + "（follow/manual）";
+            case "visionUrl": return "visionUrl = " + (p.visionUrl().isEmpty() ? "(空)" : p.visionUrl());
+            case "visionKey": return "visionKey = " + (p.visionKey().isEmpty() ? "(未设置)" : "••••已设置");
+            case "visionModelId": return "visionModelId = " + (p.visionModelId().isEmpty() ? "(空)" : p.visionModelId());
             case "imgVisionModel": return "imgVisionModel = " + (p.imgVisionModel().isEmpty() ? "(自动)" : p.imgVisionModel());
             case "autoTitle": return "autoTitle = " + p.autoTitle();
             default: throw new Exception("未知设置键: " + k + "（可用 list_settings 查看全部）");
@@ -439,6 +447,13 @@ public class LocalTools {
             case "imgStyle": p.imgStyle(v); break;
             case "imgDir": p.imgDir(v); break;
             case "imgVisionModel": p.imgVisionModel(v); break;
+            case "visionMode":
+                if (!"follow".equals(v) && !"manual".equals(v))
+                    throw new Exception("visionMode 只能为 follow / manual");
+                p.visionMode(v); break;
+            case "visionUrl": p.visionUrl(v); break;
+            case "visionKey": p.visionKey(v); break;
+            case "visionModelId": p.visionModelId(v); break;
             case "autoTitle": p.autoTitle(parseBool(v, "autoTitle")); break;
             default: throw new Exception("未知设置键: " + k + "（可用 list_settings 查看全部）");
         }
@@ -465,9 +480,30 @@ public class LocalTools {
         if ("false".equals(s) || "0".equals(s) || "no".equals(s) || "off".equals(s)) return false;
         throw new Exception(k + " 需要 true/false，收到: " + v);
     }
+    /** 当前会话专属工作区：主工作区/convs/<会话id>/，会话切换时自动隔离文件操作。
+     *  会话 id 为空（无会话）时回退主工作区。目录懒创建。 */
+    private static File convWorkspace() {
+        try {
+            Prefs pref = Prefs.get(App.inst);
+            File main = new File(pref.workspace());
+            MainActivity a = MainActivity.instance();
+            String cid = "";
+            if (a != null && a.chatPage() != null) {
+                ConvStore.Conv c = a.chatPage().currentConv();
+                if (c != null && c.id != null) cid = c.id;
+            }
+            if (cid.isEmpty()) return main;
+            File d = new File(main, "convs/" + cid);
+            if (!d.exists()) d.mkdirs();
+            return d;
+        } catch (Exception e) {
+            return new File(Prefs.get(App.inst).workspace());
+        }
+    }
+
     private static File resolve(String p) throws Exception {
         Prefs pref = Prefs.get(App.inst);
-        File ws = new File(pref.workspace());
+        File ws = convWorkspace();
         File f;
         if (p == null || p.trim().isEmpty()) f = ws;
         else {
@@ -540,7 +576,7 @@ public class LocalTools {
     }
 
     private static String runCommand(String command) throws Exception {
-        File ws = new File(Prefs.get(App.inst).workspace());
+        File ws = convWorkspace();
         ProcessBuilder pb = new ProcessBuilder("/system/bin/sh", "-c", command);
         pb.directory(ws);
         pb.redirectErrorStream(true);
@@ -930,8 +966,7 @@ public class LocalTools {
         if (bmp == null) return "截图失败（请确保浏览器页处于可见状态）";
         String rel = a.optString("path", "").trim();
         if (rel.contains("/") || rel.contains("\\")) throw new Exception("path 仅允许文件名");
-        String ws = Prefs.get(act).workspace();
-        java.io.File dir = new java.io.File(ws.isEmpty() ? act.getFilesDir().getAbsolutePath() : ws, "browsershots");
+        java.io.File dir = new java.io.File(convWorkspace(), "browsershots");
         dir.mkdirs();
         java.io.File f = new java.io.File(dir, rel.isEmpty()
                 ? "auto_" + new java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(new java.util.Date()) + ".png"
@@ -977,28 +1012,39 @@ public class LocalTools {
                     n == buf.length ? buf : java.util.Arrays.copyOf(buf, n), android.util.Base64.NO_WRAP);
         }
         Prefs p = Prefs.get(act);
-        // 视觉模型选择优先级：
-        // 1. imgVisionModel 配置（用户明确指定）
-        // 2. activeCloudModel（云端模式下的活跃模型）
-        // 3. cloudModels 第一个（云端默认）
-        // 4. activeModel（本地模式下的活跃模型）
-        // 5. llava（默认兜底）
-        String visionModel = p.imgVisionModel().trim();
-        if (visionModel.isEmpty()) {
-            if (p.cloudMode()) {
-                visionModel = p.activeCloudModel().isEmpty() 
-                        ? p.cloudModels().split("[,，]")[0].trim() 
-                        : p.activeCloudModel();
-            } else {
-                visionModel = p.activeModel().isEmpty() ? "llava" : p.activeModel();
+        // ===== 视觉模型选择：手动模式优先，其次沿用主模型 =====
+        // 手动模式：visionMode=manual 且 visionModelId 非空 → 用独立 visionUrl/visionKey 请求
+        // 沿用模式：visionMode=follow（默认）→ 用主模型（activeModel/activeCloudModel）+ 主接口
+        boolean manualVision = "manual".equals(p.visionMode())
+                && !p.visionModelId().trim().isEmpty();
+        String visionModel;
+        String visionUrl, visionKey;
+        if (manualVision) {
+            visionModel = p.visionModelId().trim();
+            visionUrl = p.visionUrl().trim();
+            visionKey = p.visionKey().trim();
+            if (visionUrl.isEmpty()) return "视觉模型手动配置不完整：接口地址为空（设置 → 视觉模型）";
+        } else {
+            // 沿用主模型：imgVisionModel 兼容旧配置 → activeCloudModel/activeModel → llava
+            visionModel = p.imgVisionModel().trim();
+            if (visionModel.isEmpty()) {
+                if (p.cloudMode()) {
+                    visionModel = p.activeCloudModel().isEmpty()
+                            ? p.cloudModels().split("[,，]")[0].trim()
+                            : p.activeCloudModel();
+                } else {
+                    visionModel = p.activeModel().isEmpty() ? "llava" : p.activeModel();
+                }
             }
-        }
-        // 最终兜底检查
-        if (visionModel.isEmpty()) {
-            visionModel = "llava";
+            if (visionModel.isEmpty()) visionModel = "llava";
+            visionUrl = null;
+            visionKey = null;
         }
         int timeout = Math.max(p.timeoutSec(), 30) * 1000;
-        if (p.cloudMode()) {
+        // 手动模式 或 云端模式 → OpenAI 兼容 /chat/completions
+        if (manualVision || p.cloudMode()) {
+            String baseUrl = manualVision ? visionUrl : p.cloudUrl();
+            String key = manualVision ? visionKey : p.cloudKey();
             JSONObject body = new JSONObject();
             body.put("model", visionModel);
             body.put("stream", false);
@@ -1011,14 +1057,13 @@ public class LocalTools {
             um.put("content", new JSONArray().put(c1).put(c2));
             body.put("messages", new JSONArray().put(um));
             java.util.Map<String, String> hdr = new java.util.HashMap<>();
-            String key = p.cloudKey();
             if (key != null && !key.isEmpty()) hdr.put("Authorization", "Bearer " + key);
-            Http.Resp r = Http.post(Cloud.url(p.cloudUrl(), "/chat/completions"), body.toString(), hdr, timeout);
+            Http.Resp r = Http.post(Cloud.url(baseUrl, "/chat/completions"), body.toString(), hdr, timeout);
             if (r.code != 200) return "视觉请求失败(" + r.code + ")：" + trunc(r.body, 300);
             JSONObject j = new JSONObject(r.body);
             JSONObject ch = j.optJSONArray("choices").optJSONObject(0);
             JSONObject mm = ch == null ? null : ch.optJSONObject("message");
-            return "视觉理解：\n" + (mm == null ? trunc(r.body, 600) : mm.optString("content", "（无内容）"));
+            return "视觉理解（" + visionModel + "）：\n" + (mm == null ? trunc(r.body, 600) : mm.optString("content", "（无内容）"));
         } else {
             ConvStore.Msg um = new ConvStore.Msg("user", q);
             um.attaches = new java.util.ArrayList<>();
@@ -1030,7 +1075,7 @@ public class LocalTools {
             if (r.code != 200) return "视觉请求失败(" + r.code + ")：" + trunc(r.body, 300);
             JSONObject j = new JSONObject(r.body);
             JSONObject mm = j.optJSONObject("message");
-            return "视觉理解：\n" + (mm == null ? trunc(r.body, 600) : mm.optString("content", "（无内容）"));
+            return "视觉理解（" + visionModel + "）：\n" + (mm == null ? trunc(r.body, 600) : mm.optString("content", "（无内容）"));
         }
     }
 

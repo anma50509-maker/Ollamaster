@@ -733,8 +733,13 @@ public class ChatPage extends Page {
         scrollBottom();
     }
 
-    /** AI/用户 自主会话命名：重命名当前会话并持久化 */
-    public void renameConv(final String title) {
+    /** 当前会话（供 LocalTools 会话专属工作区等外部访问；无会话返回 null） */
+    public ConvStore.Conv currentConv() { return conv; }
+
+    /** AI/用户 自主会话命名：重命名当前会话并持久化（silent=true 时不弹提示，用于 AI 自动命名） */
+    public void renameConv(final String title) { renameConv(title, false); }
+
+    public void renameConv(final String title, final boolean silent) {
         if (conv == null) return;
         String t = title == null ? "" : title.trim();
         if (t.isEmpty()) return;
@@ -745,7 +750,7 @@ public class ChatPage extends Page {
         ConvStore.save(act, conv);
         Ui.H.post(() -> {
             if (msgAdapter != null) msgAdapter.notifyDataSetChanged();
-            Ui.toast(act, "会话已命名为：" + shown);
+            if (!silent) Ui.toast(act, "会话已命名为：" + shown);
         });
     }
 
@@ -972,10 +977,14 @@ public class ChatPage extends Page {
             ArrayList<String> got = new ArrayList<>();
             try {
                 if (p.cloudMode()) {
-                    // 扫描密钥池中所有服务商，获取各自的模型列表
+                    // 密钥池：若 activeKeyIndex 指向某个条目（用户已选定服务商），只加载该服务商的模型；
+                    // 否则扫描全部密钥池条目。修复：选了密钥池模型后选择栏仍显示所有平台模型的 bug
+                    int activeIdx = p.activeKeyIndex();
+                    JSONArray pool = new JSONArray(p.apiKeyPool());
+                    boolean useSingle = activeIdx >= 0 && activeIdx < pool.length();
                     try {
-                        JSONArray pool = new JSONArray(p.apiKeyPool());
                         for (int i = 0; i < pool.length(); i++) {
+                            if (useSingle && i != activeIdx) continue;
                             JSONObject entry = pool.getJSONObject(i);
                             String url = entry.optString("url", "");
                             String key = entry.optString("key", "");
@@ -1024,8 +1033,8 @@ public class ChatPage extends Page {
                             }
                         }
                     } catch (Exception ignored) {}
-                    // 始终扫描全局 cloudUrl/cloudKey，与密钥池模型合并显示
-                    try {
+                    // 全局 cloudUrl/cloudKey 扫描（仅未选定密钥池条目时合并显示，避免混入其他平台模型）
+                    if (!useSingle) try {
                         String body = Cloud.modelsBody(p.cloudUrl(), p.cloudKey(), p.timeoutSec() * 1000);
                         if (body != null) {
                             JSONObject j = new JSONObject(body);
@@ -1312,7 +1321,7 @@ public class ChatPage extends Page {
                 if (t == null || t.trim().isEmpty()) return;
                 Ui.H.post(() -> {
                     if (conv == null) return;
-                    renameConv(t.trim());
+                    renameConv(t.trim(), true);
                 });
             } catch (Exception ignored) {}
         }, "om-title").start();
@@ -1406,11 +1415,12 @@ public class ChatPage extends Page {
         ensureConv();
         ArrayList<String> atts = new ArrayList<>(pendingAttaches);
         if ("新对话".equals(conv.title)) {
+            // 首句占位标题（历史列表立即可见），AI 回复完成后自动生成正式标题
             String t = text.isEmpty() && !atts.isEmpty()
                     ? attachLabel(atts.get(0))
                     : text.replace('\n', ' ');
             conv.title = t;
-            titleAutoPending = true;  // 等待 AI 自主优化标题
+            titleAutoPending = true;  // 等待 AI 自主生成标题
         }
         if (conv.title.length() > 18) conv.title = conv.title.substring(0, 17) + "…";
         ConvStore.Msg um = new ConvStore.Msg("user", text);
@@ -2380,6 +2390,27 @@ public class ChatPage extends Page {
         Prefs p = Prefs.get(act);
         if (p.cloudMode()) p.activeCloudModel(name);
         else p.activeModel(name);
+        // 记录选中模型来自密钥池哪个条目：loadModels 据此只显示该服务商的模型（修复混显 bug）
+        try {
+            if (p.cloudMode()) {
+                JSONArray pool = new JSONArray(p.apiKeyPool());
+                for (int i = 0; i < pool.length(); i++) {
+                    JSONObject entry = pool.getJSONObject(i);
+                    String url = entry.optString("url", "");
+                    String key = entry.optString("key", "");
+                    if (url.isEmpty()) continue;
+                    // 该条目 url/key 与选中模型的来源一致 → 记住索引
+                    for (ModelEntry me : modelEntries) {
+                        if (me.name.equals(name) && me.url.equals(url) && me.key.equals(key)) {
+                            p.activeKeyIndex(i);
+                            return;
+                        }
+                    }
+                }
+                // 未匹配密钥池条目（手动输入/全局云端）→ 清除单选模式
+                p.activeKeyIndex(-1);
+            }
+        } catch (Exception ignored) {}
         if (conv != null) conv.model = name;
     }
 

@@ -161,8 +161,8 @@ public class WorkPage extends Page {
 
         LinearLayout acts = new LinearLayout(act);
         acts.setOrientation(LinearLayout.HORIZONTAL);
-        String[] labels = {"＋文件", "＋目录", "刷新", "工作区"};
-        Runnable[] runs = {this::newFileDialog, this::newDirDialog,
+        String[] labels = {"＋文件", "＋目录", "会话区", "刷新", "工作区"};
+        Runnable[] runs = {this::newFileDialog, this::newDirDialog, this::gotoConvWorkspace,
                 () -> { ensurePerms(); refreshFiles(); }, this::workspaceDialog};
         for (int i = 0; i < labels.length; i++) {
             TextView b = Ui.btnGhost(act, t, labels[i]);
@@ -199,6 +199,22 @@ public class WorkPage extends Page {
         }
         Ui.H.post(() -> pathBar.getParent().requestChildRectangleOnScreen(pathBar,
                 new android.graphics.Rect(pathBar.getWidth() - 4, 0, pathBar.getWidth(), pathBar.getHeight()), false));
+    }
+
+    /** 跳转到当前会话专属工作区（主工作区/convs/<会话id>/），无会话时提示 */
+    private void gotoConvWorkspace() {
+        MainActivity a = MainActivity.instance();
+        String cid = "";
+        if (a != null && a.chatPage() != null) {
+            ConvStore.Conv c = a.chatPage().currentConv();
+            if (c != null && c.id != null) cid = c.id;
+        }
+        if (cid.isEmpty()) { Ui.toast(act, "当前无活动会话，使用主工作区"); return; }
+        File d = new File(Prefs.get(act).workspace(), "convs/" + cid);
+        if (!d.exists()) d.mkdirs();
+        cwd = d;
+        refreshFiles();
+        Ui.toast(act, "已进入会话专属工作区");
     }
 
     private void refreshFiles() {
