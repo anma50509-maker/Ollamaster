@@ -977,58 +977,13 @@ public class ChatPage extends Page {
             ArrayList<String> got = new ArrayList<>();
             try {
                 if (p.cloudMode()) {
-                    // 始终扫描所有密钥池条目 + 云端配置，选定的模型高亮显示
-                    JSONArray pool = new JSONArray(p.apiKeyPool());
-                    try {
-                        for (int i = 0; i < pool.length(); i++) {
-                            JSONObject entry = pool.getJSONObject(i);
-                            String url = entry.optString("url", "");
-                            String key = entry.optString("key", "");
-                            String name = entry.optString("name", "");
-                            String provider = ApiKeyManagerDialog.KeyEntry.fromJson(entry).providerTag();
-                            // 优先用 API 扫描模型列表
-                            if (!url.isEmpty()) {
-                                try {
-                                    String body = Cloud.modelsBody(url, key, p.timeoutSec() * 1000);
-                                    if (body != null) {
-                                        JSONObject j = new JSONObject(body);
-                                        JSONArray arr = j.optJSONArray("data");
-                                        if (arr != null) {
-                                            for (int k = 0; k < arr.length(); k++) {
-                                                String m = arr.getJSONObject(k).optString("id");
-                                                if (!m.isEmpty() && !got.contains(m)) {
-                                                    got.add(m);
-                                                    entries.add(new ModelEntry(m, provider, url, key));
-                                                }
-                                            }
-                                        }
-                                        JSONArray models = j.optJSONArray("models");
-                                        if (models != null) {
-                                            for (int k = 0; k < models.length(); k++) {
-                                                String m = models.getJSONObject(k).optString("name");
-                                                if (!m.isEmpty() && !got.contains(m)) {
-                                                    got.add(m);
-                                                    entries.add(new ModelEntry(m, provider, url, key));
-                                                }
-                                            }
-                                        }
-                                    }
-                                } catch (Exception ignored) {}
-                            }
-                            // 回退到手动配置的模型列表
-                            JSONArray manualModels = entry.optJSONArray("models");
-                            if (manualModels != null) {
-                                for (int j = 0; j < manualModels.length(); j++) {
-                                    String m = manualModels.optString(j);
-                                    if (!m.isEmpty() && !got.contains(m)) {
-                                        got.add(m);
-                                        entries.add(new ModelEntry(m, provider, url, key));
-                                    }
-                                }
-                            }
-                        }
-                    } catch (Exception ignored) {}
-                    // 始终扫描全局 cloudUrl/cloudKey
+                    // ===== 1. 云端配置优先显示（设置→云端模式的 cloudUrl/cloudKey/cloudModels）=====
+                    // 手动配置的 cloudModels 始终显示
+                    for (String s : p.cloudModels().split("[,，]")) if (!s.trim().isEmpty()) {
+                        got.add(s.trim());
+                        entries.add(new ModelEntry(s.trim(), "云端", p.cloudUrl(), p.cloudKey()));
+                    }
+                    // API 扫描云端接口的模型列表
                     try {
                         String body = Cloud.modelsBody(p.cloudUrl(), p.cloudKey(), p.timeoutSec() * 1000);
                         if (body != null) {
@@ -1041,9 +996,9 @@ public class ChatPage extends Page {
                                     entries.add(new ModelEntry(m, "云端", p.cloudUrl(), p.cloudKey()));
                                 }
                             }
-                            JSONArray models = j.optJSONArray("models");
-                            if (models != null) for (int i = 0; i < models.length(); i++) {
-                                String m = models.getJSONObject(i).optString("name");
+                            JSONArray models2 = j.optJSONArray("models");
+                            if (models2 != null) for (int i = 0; i < models2.length(); i++) {
+                                String m = models2.getJSONObject(i).optString("name");
                                 if (!m.isEmpty() && !got.contains(m)) {
                                     got.add(m);
                                     entries.add(new ModelEntry(m, "云端", p.cloudUrl(), p.cloudKey()));
@@ -1051,10 +1006,53 @@ public class ChatPage extends Page {
                             }
                         }
                     } catch (Exception ignored) {}
-                    if (entries.isEmpty()) for (String s : p.cloudModels().split("[,，]")) if (!s.trim().isEmpty()) {
-                        got.add(s.trim());
-                        entries.add(new ModelEntry(s.trim(), "云端", p.cloudUrl(), p.cloudKey()));
-                    }
+
+                    // ===== 2. 密钥池：只显示用户手动配置的模型列表；未配置才 API 扫描 =====
+                    // 修复：用户在某服务商只配置了 1 个模型，但 API 扫描显示了该服务商全部模型
+                    JSONArray pool = new JSONArray(p.apiKeyPool());
+                    try {
+                        for (int i = 0; i < pool.length(); i++) {
+                            JSONObject entry = pool.getJSONObject(i);
+                            String url = entry.optString("url", "");
+                            String key = entry.optString("key", "");
+                            String provider = ApiKeyManagerDialog.KeyEntry.fromJson(entry).providerTag();
+                            JSONArray manualModels = entry.optJSONArray("models");
+                            if (manualModels != null && manualModels.length() > 0) {
+                                // 用户配置了模型列表 → 只显示这些（不 API 扫描）
+                                for (int j = 0; j < manualModels.length(); j++) {
+                                    String m = manualModels.optString(j);
+                                    if (!m.isEmpty() && !got.contains(m)) {
+                                        got.add(m);
+                                        entries.add(new ModelEntry(m, provider, url, key));
+                                    }
+                                }
+                            } else if (!url.isEmpty()) {
+                                // 未配置模型列表 → API 扫描该服务商
+                                try {
+                                    String body = Cloud.modelsBody(url, key, p.timeoutSec() * 1000);
+                                    if (body != null) {
+                                        JSONObject j = new JSONObject(body);
+                                        JSONArray arr = j.optJSONArray("data");
+                                        if (arr != null) for (int k = 0; k < arr.length(); k++) {
+                                            String m = arr.getJSONObject(k).optString("id");
+                                            if (!m.isEmpty() && !got.contains(m)) {
+                                                got.add(m);
+                                                entries.add(new ModelEntry(m, provider, url, key));
+                                            }
+                                        }
+                                        JSONArray models2 = j.optJSONArray("models");
+                                        if (models2 != null) for (int k = 0; k < models2.length(); k++) {
+                                            String m = models2.getJSONObject(k).optString("name");
+                                            if (!m.isEmpty() && !got.contains(m)) {
+                                                got.add(m);
+                                                entries.add(new ModelEntry(m, provider, url, key));
+                                            }
+                                        }
+                                    }
+                                } catch (Exception ignored) {}
+                            }
+                        }
+                    } catch (Exception ignored) {}
                 } else {
                     List<String> local = Ollama.models(p.host(), p.port(), p.timeoutSec() * 1000);
                     for (String m : local) {
