@@ -480,22 +480,12 @@ public class LocalTools {
         if ("false".equals(s) || "0".equals(s) || "no".equals(s) || "off".equals(s)) return false;
         throw new Exception(k + " 需要 true/false，收到: " + v);
     }
-    /** 当前会话专属工作区：主工作区/convs/<会话id>/，会话切换时自动隔离文件操作。
-     *  会话 id 为空（无会话）时回退主工作区。目录懒创建。 */
+    /** 所有会话共享主工作区（已移除按会话 id 隔离的 convs/<会话id> 机制）。 */
     private static File convWorkspace() {
         try {
-            Prefs pref = Prefs.get(App.inst);
-            File main = new File(pref.workspace());
-            MainActivity a = MainActivity.instance();
-            String cid = "";
-            if (a != null && a.chatPage() != null) {
-                ConvStore.Conv c = a.chatPage().currentConv();
-                if (c != null && c.id != null) cid = c.id;
-            }
-            if (cid.isEmpty()) return main;
-            File d = new File(main, "convs/" + cid);
-            if (!d.exists()) d.mkdirs();
-            return d;
+            File main = new File(Prefs.get(App.inst).workspace());
+            if (!main.exists()) main.mkdirs();
+            return main;
         } catch (Exception e) {
             return new File(Prefs.get(App.inst).workspace());
         }
