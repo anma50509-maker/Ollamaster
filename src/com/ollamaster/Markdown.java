@@ -552,6 +552,8 @@ public class Markdown {
     public static class RichResult {
         public CharSequence text = "";
         public java.util.List<View> views = new java.util.ArrayList<>();
+        /** 有序片段：CharSequence 文本块 或 View 视图块（表格/图片），渲染顺序即原文顺序 */
+        public java.util.List<Object> flow = new java.util.ArrayList<>();
     }
 
     /**
@@ -571,9 +573,12 @@ public class Markdown {
             }
             String[] lines = parts[i].split("\n", -1);
             for (int li = 0; li < lines.length; li++) {
-                String line = extractInlineImages(ctx, lines[li], t, r.views);
+                // 行内本地图片：提取为视图块，保留其在原文中的位置
+                java.util.List<View> imgs = new java.util.ArrayList<>();
+                String line = extractInlineImages(ctx, lines[li], t, imgs);
                 if (P_TABLE_ROW.matcher(line).matches() && li + 1 < lines.length
                         && P_TABLE_SEP.matcher(lines[li + 1]).matches()) {
+                    flushText(ctx, t, r, acc);
                     java.util.List<String> rows = new java.util.ArrayList<>();
                     rows.add(line);
                     li++;
@@ -582,14 +587,35 @@ public class Markdown {
                         li++;
                         rows.add(lines[li]);
                     }
-                    r.views.add(buildTableView(ctx, rows, t));
+                    r.flow.add(buildTableView(ctx, rows, t));
                     continue;
                 }
                 acc.append(line).append('\n');
+                if (!imgs.isEmpty()) {
+                    // 该行文本先落位，图片紧跟其后 → 图片停留在原文位置而非气泡底部
+                    flushText(ctx, t, r, acc);
+                    r.flow.addAll(imgs);
+                }
             }
         }
-        r.text = render(ctx, acc.toString(), t);
+        flushText(ctx, t, r, acc);
+        // 兼容字段：text = 全文本拼接后 render；views = flow 中的全部视图
+        StringBuilder allText = new StringBuilder();
+        for (Object o : r.flow) {
+            if (o instanceof CharSequence) allText.append(o);
+            else r.views.add((View) o);
+        }
+        r.text = render(ctx, allText.toString(), t);
         return r;
+    }
+
+    /** 把累积的文本块渲染后推入 flow */
+    private static void flushText(Context ctx, Theme t, RichResult r, StringBuilder acc) {
+        if (acc.length() == 0) return;
+        String rawS = acc.toString();
+        acc.setLength(0);
+        CharSequence rendered = render(ctx, rawS, t);
+        if (rendered.length() > 0) r.flow.add(rendered);
     }
 
     /** 提取行内本地图片 ![alt](本地路径)：渲染成 ImageView 加入视图列表，并从行文本移除标记 */

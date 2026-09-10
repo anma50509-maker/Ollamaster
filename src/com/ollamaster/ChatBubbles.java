@@ -174,21 +174,12 @@ class ChatBubbles {
         tlp.rightMargin = Ui.dpi(act, 34);
         col.addView(think, tlp);
 
-        TextView tv = new TextView(act);
-        tv.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.spi(act, 14.5f));
-        tv.setLineSpacing(0, 1.3f);
-        tv.setHighlightColor(t.alpha(t.accent, 0.26f));
-        int pad = Ui.dpi(act, 13);
-        tv.setPadding(pad, pad - 3, pad, pad - 3);
-        tv.setBackground(Ui.radii(t.surfaceAlt, Ui.dpi(act, 4), Ui.dpi(act, 17),
-                Ui.dpi(act, 17), Ui.dpi(act, 17)));
-
         String raw = m.content == null ? "" : m.content;
         boolean showThink = Prefs.get(act).showThink();
         String thinkText = null, answerText;
-        int ta = ChatPage.idxOf(raw, "<think>");
+        int ta = ChatPage.idxOf(raw, " <think>");
         if (showThink && ta >= 0) {
-            int tb = ChatPage.idxOf(raw, "</think>", ta + 7);
+            int tb = ChatPage.idxOf(raw, " </think>", ta + 7);
             thinkText = tb >= 0 ? raw.substring(ta + 7, tb) : raw.substring(ta + 7);
             answerText = tb >= 0 ? raw.substring(tb + 8) : "";
         } else {
@@ -197,37 +188,71 @@ class ChatBubbles {
         if (thinkText != null && !thinkText.trim().isEmpty()) {
             applyThinkBlock(think, "think|" + m.ts, thinkText);
         }
-        CharSequence rendered;
-        java.util.List<View> richTables = null;
+
+        // 正文容器：统一圆角背景，内部按 flow 顺序渲染文本块与表格/图片视图（视图停留在原文位置）
+        LinearLayout bodyBox = new LinearLayout(act);
+        bodyBox.setOrientation(LinearLayout.VERTICAL);
+        int pad = Ui.dpi(act, 13);
+        bodyBox.setPadding(pad, pad - 3, pad, pad - 3);
+        bodyBox.setBackground(Ui.radii(t.surfaceAlt, Ui.dpi(act, 4), Ui.dpi(act, 17),
+                Ui.dpi(act, 17), Ui.dpi(act, 17)));
+
+        Markdown.RichResult rr;
         try {
             if (!cp.streaming) {
-                // 完整答案：富文本分段渲染（表格 → 可滚动视图，紧邻文本）
-                Markdown.RichResult rr = Markdown.prepareRich(act, answerText, t);
-                rendered = rr.text;
-                richTables = rr.views;
+                // 完整答案：文本块与表格/图片按原文顺序穿插渲染
+                rr = Markdown.prepareRich(act, answerText, t);
             } else {
-                rendered = Markdown.render(act, answerText.isEmpty() ? "▍" : answerText, t);
+                // 流式：实时 MD 渲染为单个文本块，后续由 refreshStreamingBubble 持续更新
+                rr = new Markdown.RichResult();
+                rr.flow.add(Markdown.render(act, answerText.isEmpty() ? "▍" : answerText, t));
             }
         } catch (Throwable e) {
-            rendered = answerText;
+            rr = new Markdown.RichResult();
+            rr.flow.add(answerText);
         }
-        tv.setText(rendered);
-        tv.setOnLongClickListener(vv -> {
+
+        TextView firstText = null;
+        for (Object seg : rr.flow) {
+            if (seg instanceof View) {
+                LinearLayout.LayoutParams vlp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                vlp.topMargin = Ui.dpi(act, 2);
+                bodyBox.addView((View) seg, vlp);
+            } else {
+                TextView chunk = new TextView(act);
+                chunk.setText((CharSequence) seg);
+                chunk.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.spi(act, 14.5f));
+                chunk.setLineSpacing(0, 1.3f);
+                chunk.setHighlightColor(t.alpha(t.accent, 0.26f));
+                chunk.setTextColor(t.textPri);
+                if (firstText == null) {
+                    firstText = chunk;
+                    bodyBox.addView(chunk, new LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+                } else {
+                    LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                    clp.topMargin = Ui.dpi(act, 6);
+                    bodyBox.addView(chunk, clp);
+                }
+            }
+        }
+        if (firstText == null) {
+            firstText = new TextView(act);
+            firstText.setText("");
+            firstText.setVisibility(View.GONE);
+            bodyBox.addView(firstText);
+        }
+        bodyBox.setVisibility(answerText.isEmpty() && !cp.streaming ? View.GONE : View.VISIBLE);
+        bodyBox.setOnLongClickListener(vv -> {
             cp.dialogs.msgMenu(m, true);
             return true;
         });
-        tv.setVisibility(answerText.isEmpty() && !cp.streaming ? View.GONE : View.VISIBLE);
-        col.addView(tv, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        if (richTables != null && !richTables.isEmpty()) {
-            for (View tvT : richTables) {
-                LinearLayout.LayoutParams tableLp = new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                tableLp.topMargin = Ui.dpi(act, 3);
-                tableLp.rightMargin = Ui.dpi(act, 30);
-                col.addView(tvT, tableLp);
-            }
-        }
+        LinearLayout.LayoutParams bodyLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        bodyLp.rightMargin = Ui.dpi(act, 34);
+        col.addView(bodyBox, bodyLp);
 
         TextView meta = new TextView(act);
         StringBuilder mt = new StringBuilder(cp.tf.format(new Date(m.ts)));
@@ -247,13 +272,9 @@ class ChatBubbles {
         row.addView(col, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        LinearLayout.LayoutParams tvlp = (LinearLayout.LayoutParams) tv.getLayoutParams();
-        tvlp.rightMargin = Ui.dpi(act, 34);
-        tv.setLayoutParams(tvlp);
-
-        row.setTag(new ChatPage.AiHolder(think, tv));
+        row.setTag(new ChatPage.AiHolder(think, firstText));
         // 登记到流式刷新注册表：流式期间重建列表后仅重新绑定正在生成的气泡，避免误绑旧消息
-        if (!cp.streaming || m == cp.streamMsg) cp.streamViews.put(System.identityHashCode(m), new ChatPage.AiHolder(think, tv));
+        if (!cp.streaming || m == cp.streamMsg) cp.streamViews.put(System.identityHashCode(m), new ChatPage.AiHolder(think, firstText));
         if (cp.pendingRegister && m == cp.streamMsg) { cp.pendingRegister = false; cp.markDirty(); }
         row.setOnLongClickListener(vv -> {
             cp.dialogs.msgMenu(m, true);

@@ -777,7 +777,8 @@ public class ChatPage extends Page {
                 }
                 h.main.setVisibility(View.VISIBLE);
                 next = answerText.isEmpty() ? "▍" : tailOf(answerText) + " ▍";
-                h.main.setText(next);
+                // 流式实时 MD 渲染：加粗/标题/代码等格式随输入即时呈现
+                h.main.setText(Markdown.render(act, next, t));
             }
             if (next.equals(lastStreamRendered)) { flushDiag[2]++; return; }
             lastStreamRendered = next;
