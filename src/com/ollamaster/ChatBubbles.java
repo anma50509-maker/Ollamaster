@@ -273,10 +273,10 @@ class ChatBubbles {
         boolean isTool = "tool".equals(m.role);
         final String key = m.ts + "|" + m.role + "|" + (m.toolName == null ? "" : m.toolName);
         TextView card = new TextView(act);
-        card.setTextColor(isTool ? t.alpha(t.ok, 0.95f) : t.alpha(t.danger, 0.95f));
+        card.setTextColor(isTool ? t.alpha(t.accent, 0.95f) : t.alpha(t.danger, 0.95f));
         card.setTypeface(isTool ? Ui.mono() : Typeface.DEFAULT);
         card.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 11));
-        card.setBackground(Ui.round(t.alpha(isTool ? t.ok : t.danger, 0.07f), Ui.dpi(act, 10)));
+        card.setBackground(Ui.round(t.alpha(isTool ? t.accent : t.danger, 0.07f), Ui.dpi(act, 10)));
         int cpad = Ui.dpi(act, 9);
         card.setPadding(cpad, cpad - 3, cpad, cpad - 3);
 

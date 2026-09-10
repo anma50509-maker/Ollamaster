@@ -1221,9 +1221,16 @@ public class ChatPage extends Page {
     }
 
     /** AI 自主会话命名：后台线程让当前模型根据对话内容生成简短标题，成功后更新会话标题 */
+    /** 会话标题是否仍需要 AI 命名：尚未命名过或仍是默认占位标题 */
+    boolean needsTitle() {
+        if (conv == null) return false;
+        String t = conv.title;
+        return titleAutoPending || t == null || t.isEmpty() || "新对话".equals(t);
+    }
+
     private void autoTitle() {
         if (conv == null || conv.msgs.size() < 2) return;
-        if (!titleAutoPending) return;
+        if (!needsTitle()) return;
         new Thread(() -> {
             try {
                 final String t = titleSync();
@@ -1597,9 +1604,9 @@ public class ChatPage extends Page {
             } else {
                 contDepth = 0;
                 // AI 自主会话命名：一轮完整回复（无工具）且启用时，自动让当前模型为会话起标题
+                // 强制 AI 会话命名：标题仍是默认占位就自动生成，不依赖 AI 是否记得调 rename_conv
                 if (Prefs.get(act).autoTitle() && conv != null
-                        && titleAutoPending && !streaming) {
-                    titleAutoPending = false;
+                        && !streaming && needsTitle()) {
                     autoTitle();
                 }
             }
@@ -1674,7 +1681,7 @@ public class ChatPage extends Page {
         int n = specs == null ? 0 : specs.length();
         if (n > 0) {
             toolHint.setText("已挂载 " + n + " 个工具（内置/插件/MCP），模型可自动调用");
-            toolHint.setTextColor(t.alpha(t.ok, 0.95f));
+            toolHint.setTextColor(t.alpha(t.accent, 0.95f));
             Icon.unpin(toolHint);
             Icon.pinLeft(toolHint, "gear", 12);
         } else {
