@@ -42,9 +42,9 @@ import java.util.Locale;
 @SuppressWarnings("unused")
 public class ChatPage extends Page {
     @SuppressWarnings("rawtypes")
-    private Theme t;
+    Theme t;
     private ListView msgList;
-    private MsgAdapter msgAdapter;
+    BaseAdapter msgAdapter;
     private LinearLayout emptyBox;
     private EditText input;
     private FrameLayout sendBtn;
@@ -60,9 +60,9 @@ public class ChatPage extends Page {
     private final ArrayList<String> pendingAttaches = new ArrayList<>();
     private static final int REQ_PICK_FILE = 77;
     private TextView toolHint;
-    private ConvStore.Conv conv;
-    private List<Personas.P> personas = new ArrayList<>();
-    private Personas.P persona;
+    ConvStore.Conv conv;
+    List<Personas.P> personas = new ArrayList<>();
+    Personas.P persona;
     // 模型条目：模型名 + 服务商来源
     static class ModelEntry {
         final String name;
@@ -73,51 +73,32 @@ public class ChatPage extends Page {
             this.name = name; this.provider = provider; this.url = url; this.key = key;
         }
     }
-    private ArrayList<ModelEntry> modelEntries = new ArrayList<>();
+    ArrayList<ModelEntry> modelEntries = new ArrayList<>();
     // 兼容：纯模型名列表
-    private ArrayList<String> models = new ArrayList<>();
-    private String model = "";
+    ArrayList<String> models = new ArrayList<>();
+    String model = "";
     private Http.Cancel cancel;
-    private volatile boolean streaming;
-    private ConvStore.Msg streamMsg;
+    volatile boolean streaming;
+    ConvStore.Msg streamMsg;
     /** 流式气泡注册表：msg 身份 hash → 对应气泡的思考/正文视图（构建气泡时登记，delta 时精准刷新） */
-    private final android.util.SparseArray<Object> streamViews = new android.util.SparseArray<>();
+    final android.util.SparseArray<Object> streamViews = new android.util.SparseArray<>();
 
     /** AI 气泡内需要流式刷新的两个视图 */
-    private static class AiHolder {
+    static class AiHolder {
         final TextView think;
         final TextView main;
         AiHolder(TextView think, TextView main) { this.think = think; this.main = main; }
     }
 
 
-    private static int idxOf(String s, String tag) {
+    static int idxOf(String s, String tag) {
         return s.toLowerCase(Locale.US).indexOf(tag);
     }
 
-    private static int idxOf(String s, String tag, int from) {
+    static int idxOf(String s, String tag, int from) {
         return s.toLowerCase(Locale.US).indexOf(tag, from);
     }
 
-    /** 思考折叠条：收起为一行摘要，点击展开/收起全文（半透明小字号） */
-    private void applyThinkBlock(TextView think, String key, String thinkText) {
-        boolean expanded = expandedCards.contains(key);
-        Icon.unpin(think);
-        if (expanded) {
-            think.setText("已深度思考\n" + thinkText.trim());
-            think.setMaxLines(500);
-        } else {
-            think.setText("已深度思考");
-            think.setMaxLines(1);
-        }
-        think.setVisibility(View.VISIBLE);
-        Icon.pinLeft(think, "think", 13);
-        think.setOnClickListener(v -> {
-            if (expandedCards.contains(key)) expandedCards.remove(key);
-            else expandedCards.add(key);
-            applyThinkBlock(think, key, thinkText);
-        });
-    }
     private int retryCount = 0;
     private int contDepth = 0;
     private volatile boolean truncated;
@@ -133,7 +114,7 @@ public class ChatPage extends Page {
     private boolean thinkOpen = false;
     private int toolRounds = 0;
     /** 流式期间列表发生整体重建后，需要重新登记 streamMsg 对应的气泡 */
-    private boolean pendingRegister;
+    boolean pendingRegister;
     /** 流式渲染诊断：{首次渲染耗时ms(-1=未渲染), 成功渲染次数} */
     private final long[] renderDiag = {-1, 0};
     /** 刷新链路埋点：{心跳执行, tv丢失, 同文跳过, 前置return, markDirty进入} */
@@ -155,9 +136,16 @@ public class ChatPage extends Page {
     };
     private android.os.PowerManager.WakeLock wakeLock;
     private android.net.wifi.WifiManager.WifiLock wifiLock;
-    private final SimpleDateFormat tf = new SimpleDateFormat("HH:mm", Locale.getDefault());
+    final SimpleDateFormat tf = new SimpleDateFormat("HH:mm", Locale.getDefault());
 
-    public ChatPage(MainActivity a) { super(a); }
+    final ChatDialogs dialogs;
+    final ChatBubbles bubbles;
+
+    public ChatPage(MainActivity a) {
+        super(a);
+        dialogs = new ChatDialogs(this);
+        bubbles = new ChatBubbles(this);
+    }
 
     @Override
     protected View build() {
@@ -174,7 +162,7 @@ public class ChatPage extends Page {
         msgList.setSelector(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
         int ph = Ui.dpi(act, 10);
         msgList.setPadding(ph, Ui.dpi(act, 4), ph, Ui.dpi(act, 8));
-        msgAdapter = new MsgAdapter();
+        msgAdapter = bubbles.adapter();
         msgList.setAdapter(msgAdapter);
         fl.addView(msgList, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -210,7 +198,7 @@ public class ChatPage extends Page {
         modelChip = Ui.chip(act, t, "模型", false);
         Icon.pinRight(modelChip, "chevronDown", 10);
         modelChip.setGravity(Gravity.CENTER);
-        modelChip.setOnClickListener(v -> modelSheet());
+        modelChip.setOnClickListener(v -> dialogs.modelSheet());
         bar.addView(modelChip, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, Ui.dpi(act, 30)));
         LinearLayout.LayoutParams mlp = (LinearLayout.LayoutParams) modelChip.getLayoutParams();
@@ -220,7 +208,7 @@ public class ChatPage extends Page {
         Icon.pinLeft(personaChip, "star", 11);
         Icon.pinRight(personaChip, "chevronDown", 10);
         personaChip.setGravity(Gravity.CENTER);
-        personaChip.setOnClickListener(v -> personaSheet());
+        personaChip.setOnClickListener(v -> dialogs.personaSheet());
         bar.addView(personaChip, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, Ui.dpi(act, 30)));
         LinearLayout.LayoutParams plp = (LinearLayout.LayoutParams) personaChip.getLayoutParams();
@@ -229,7 +217,7 @@ public class ChatPage extends Page {
         sysChip = Ui.chip(act, t, "系统", false);
         Icon.pinRight(sysChip, "chevronDown", 10);
         sysChip.setGravity(Gravity.CENTER);
-        sysChip.setOnClickListener(v -> editSystemPrompt());
+        sysChip.setOnClickListener(v -> dialogs.editSystemPrompt());
         bar.addView(sysChip, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, Ui.dpi(act, 30)));
         ((LinearLayout.LayoutParams) sysChip.getLayoutParams()).rightMargin = Ui.dpi(act, 6);
@@ -258,7 +246,7 @@ public class ChatPage extends Page {
 
         TextView historyBtn = Ui.btnGhost(act, t, "历史");
         historyBtn.setGravity(Gravity.CENTER);
-        historyBtn.setOnClickListener(v -> historySheet());
+        historyBtn.setOnClickListener(v -> dialogs.historySheet());
         bar.addView(historyBtn, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, Ui.dpi(act, 30)));
         ((LinearLayout.LayoutParams) historyBtn.getLayoutParams()).rightMargin = Ui.dpi(act, 6);
@@ -563,52 +551,6 @@ public class ChatPage extends Page {
         crop.setImage(bmp);
     }
 
-    /** 全屏独立文本选择面板：列表内不进入系统选择（避免卡顿），需要选区时在此顺滑选择/复制 */
-    private void showTextSelect(final ConvStore.Msg m) {
-        final Dialog d = new Dialog(act);
-        d.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
-        d.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
-        d.getWindow().setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
-        LinearLayout root = new LinearLayout(act);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(t.bg);
-
-        LinearLayout bar = new LinearLayout(act);
-        bar.setOrientation(LinearLayout.HORIZONTAL);
-        bar.setGravity(Gravity.CENTER_VERTICAL);
-        bar.setPadding(Ui.dpi(act, 14), Ui.dpi(act, 10), Ui.dpi(act, 10), Ui.dpi(act, 10));
-        bar.setBackgroundColor(t.surfaceAlt);
-        TextView title = new TextView(act);
-        title.setText("选择文本");
-        title.setTextColor(t.textPri);
-        title.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 16));
-        title.setTypeface(Ui.serifBold());
-        bar.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        TextView copy = Ui.btnGhost(act, t, "复制全文");
-        copy.setOnClickListener(v -> { Ui.copy(act, m.content); d.dismiss(); });
-        bar.addView(copy);
-        TextView closeX = new TextView(act);
-        closeX.setText("");
-        closeX.setTextColor(t.textSec);
-        Icon.pinCenter(closeX, "close", 16);
-        closeX.setPadding(Ui.dpi(act, 8), Ui.dpi(act, 4), Ui.dpi(act, 4), Ui.dpi(act, 4));
-        closeX.setOnClickListener(v -> d.dismiss());
-        bar.addView(closeX);
-        root.addView(bar);
-
-        TextView tv = new TextView(act);
-        tv.setText(m.content == null ? "" : m.content);
-        tv.setTextColor(t.textPri);
-        tv.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 14.5f));
-        tv.setLineSpacing(0, 1.3f);
-        tv.setPadding(Ui.dpi(act, 16), Ui.dpi(act, 10), Ui.dpi(act, 16), Ui.dpi(act, 120));
-        tv.setGravity(Gravity.TOP);
-        tv.setTextIsSelectable(true);
-        root.addView(tv, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        d.setContentView(root);
-        d.show();
-    }
 
     /** 把 SAF 文档拷入应用私有目录，返回绝对路径（后续轮次可稳定读取） */
     private String copyToAttaches(Uri uri) throws Exception {
@@ -646,13 +588,13 @@ public class ChatPage extends Page {
         return dst.getAbsolutePath();
     }
 
-    private static String attachKind(String path) {
+    static String attachKind(String path) {
         if (ConvStore.isImage(path)) return "img";
         if (ConvStore.isTextName(path)) return "file";
         return "attach";
     }
 
-    private static String attachLabel(String path) {
+    static String attachLabel(String path) {
         java.io.File f = new java.io.File(path);
         String n = f.getName();
         return n.length() > 24 ? n.substring(0, 23) + "…" : n;
@@ -719,7 +661,7 @@ public class ChatPage extends Page {
         refreshEmpty();
     }
 
-    private void loadConv(ConvStore.Conv c) {
+    void loadConv(ConvStore.Conv c) {
         stopStream(false);
         conv = c;
         titleAutoPending = false;
@@ -754,7 +696,7 @@ public class ChatPage extends Page {
         });
     }
 
-    private void refreshEmpty() {
+    void refreshEmpty() {
         boolean empty = conv == null || conv.msgs.isEmpty();
         emptyBox.setVisibility(empty ? View.VISIBLE : View.GONE);
     }
@@ -769,7 +711,7 @@ public class ChatPage extends Page {
         });
     }
 
-    private void markDirty() {
+    void markDirty() {
         flushDiag[4]++;
         if (flushPending) return;
         flushPending = true;
@@ -779,41 +721,10 @@ public class ChatPage extends Page {
         }, 40);
     }
 
-    private void refreshViews() {
+    void refreshViews() {
         streamViews.clear();
         if (streaming && streamMsg != null) pendingRegister = true;
         if (msgAdapter != null) msgAdapter.notifyDataSetChanged();
-    }
-
-    /** 虚拟化消息列表：ListView 只测量/布局屏幕内的气泡，历史长度不再拖慢流式刷新 */
-    private class MsgAdapter extends android.widget.BaseAdapter {
-        @Override public int getCount() { return conv == null ? 0 : conv.msgs.size(); }
-        @Override public Object getItem(int position) { return conv.msgs.get(position); }
-        @Override public long getItemId(int position) { return position; }
-        @Override public int getViewTypeCount() { return 3; }
-        @Override public int getItemViewType(int position) {
-            String r = conv.msgs.get(position).role;
-            if ("user".equals(r)) return 0;
-            if ("assistant".equals(r)) return 1;
-            return 2;
-        }
-        @Override public View getView(int position, View convertView, ViewGroup parent) {
-            final ConvStore.Msg m = conv.msgs.get(position);
-            try {
-                String r = m.role;
-                if ("user".equals(r)) return buildUserBubble(null, m);
-                if ("assistant".equals(r)) return buildAiBubble(null, m);
-                return buildSmallCard(null, m);
-            } catch (Throwable e) {
-                TextView fb = new TextView(act);
-                fb.setText(m.content);
-                fb.setTextColor(t.textPri);
-                fb.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.spi(act, 14.5f));
-                int pad = Ui.dpi(act, 10);
-                fb.setPadding(pad, pad, pad, pad);
-                return fb;
-            }
-        }
     }
 
     /** 流式期间只刷新正在生成的气泡：通过注册表精确定位 TextView，
@@ -860,7 +771,7 @@ public class ChatPage extends Page {
                 next = tailOf(thinkText);
             } else {
                 if (showThink && thinkText != null && !thinkText.trim().isEmpty()) {
-                    applyThinkBlock(h.think, "think|" + streamMsg.ts, thinkText);
+                    bubbles.applyThinkBlock(h.think, "think|" + streamMsg.ts, thinkText);
                 } else {
                     h.think.setVisibility(View.GONE);
                 }
@@ -905,7 +816,7 @@ public class ChatPage extends Page {
         return out.toString().replaceAll("\n{3,}", "\n\n").trim();
     }
 
-    private void updateChips() {
+    void updateChips() {
         boolean cloud = Prefs.get(act).cloudMode();
         String mShort = model.isEmpty() ? (cloud ? "云端模型" : "模型") :
                 (model.length() > 14 ? model.substring(0, 13) + "…" : model);
@@ -1884,7 +1795,7 @@ public class ChatPage extends Page {
         }).start();
     }
 
-    private void regenerate() {
+    void regenerate() {
         if (conv == null || streaming) return;
         while (!conv.msgs.isEmpty()) {
             ConvStore.Msg last = conv.msgs.get(conv.msgs.size() - 1);
@@ -1937,325 +1848,13 @@ public class ChatPage extends Page {
     }
 
 
-    private View buildUserBubble(View cv, final ConvStore.Msg m) {
-        LinearLayout wrap = new LinearLayout(act);
-        wrap.setOrientation(LinearLayout.VERTICAL);
-        wrap.setGravity(Gravity.END);
-
-        boolean hasAtt = m.attaches != null && !m.attaches.isEmpty();
-        if (hasAtt) {
-            LinearLayout chips = new LinearLayout(act);
-            chips.setOrientation(LinearLayout.HORIZONTAL);
-            chips.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
-            for (String p : m.attaches) {
-                TextView chip = new TextView(act);
-                chip.setText(attachLabel(p));
-                Icon.pinLeft(chip, attachKind(p), 12);
-                chip.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 10.5f));
-                chip.setTextColor(t.textSec);
-                chip.setSingleLine(true);
-                int cpad = Ui.dpi(act, 7);
-                chip.setPadding(cpad, Ui.dpi(act, 3), cpad, Ui.dpi(act, 3));
-                chip.setBackground(Ui.round(t.alpha(t.textPri, 0.07f), Ui.dpi(act, 999)));
-                chips.addView(chip);
-                LinearLayout.LayoutParams clp = (LinearLayout.LayoutParams) chip.getLayoutParams();
-                clp.leftMargin = Ui.dpi(act, 5);
-                chip.setLayoutParams(clp);
-            }
-            wrap.addView(chips, new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        }
-
-        LinearLayout row = new LinearLayout(act);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
-
-        TextView tv = new TextView(act);
-        tv.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.spi(act, 14.5f));
-        tv.setLineSpacing(0, 1.25f);
-        int pad = Ui.dpi(act, 13);
-        tv.setPadding(pad, pad - 3, pad, pad - 3);
-        tv.setTextColor(t.mixTextOn(t));
-        tv.setText(m.content);
-        tv.setHighlightColor(0x55FFFFFF);
-        tv.setBackground(Ui.radii(t.alpha(t.accent, 0.92f), Ui.dpi(act, 17),
-                Ui.dpi(act, 4), Ui.dpi(act, 17), Ui.dpi(act, 17)));
-        tv.setMaxWidth(Ui.dpi(act, 272));
-        row.addView(tv, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        wrap.addView(row, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) tv.getLayoutParams();
-        lp.topMargin = Ui.dpi(act, 5);
-        lp.bottomMargin = Ui.dpi(act, 5);
-        tv.setLayoutParams(lp);
-
-        // 时间戳行：同时提供长按消息菜单入口（文本选择模式已占用地板长按）
-        TextView umeta = new TextView(act);
-        umeta.setText(tf.format(new java.util.Date(m.ts)));
-        umeta.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 9.5f));
-        umeta.setTextColor(t.alpha(t.textSec, 0.9f));
-        umeta.setPadding(0, 0, Ui.dpi(act, 6), 0);
-        umeta.setGravity(Gravity.END);
-        umeta.setOnLongClickListener(vv -> {
-            msgMenu(m, false);
-            return true;
-        });
-        wrap.addView(umeta, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        wrap.setOnLongClickListener(vv -> {
-            msgMenu(m, false);
-            return true;
-        });
-        return wrap;
-    }
-
-    private View buildAiBubble(View cv, final ConvStore.Msg m) {
-        LinearLayout row = new LinearLayout(act);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-
-        FrameLayout avatar = new FrameLayout(act);
-        avatar.setBackground(Ui.stroke(t.alpha(t.accent, 0.12f), t.alpha(t.accent, 0.45f),
-                Ui.dpi(act, 999), Ui.dpi(act, 0.9f)));
-        ImageView avImg = new ImageView(act);
-        Drawable avd = persona != null ? loadAvatar(persona.avatar, 16) : null;
-        avImg.setImageDrawable(avd != null ? avd : Icon.v(act, "avatar", t.accent, 14));
-        avatar.addView(avImg, new FrameLayout.LayoutParams(Ui.dpi(act, 16), Ui.dpi(act, 16), Gravity.CENTER));
-        LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(Ui.dpi(act, 24), Ui.dpi(act, 24));
-        alp.topMargin = Ui.dpi(act, 6);
-        alp.rightMargin = Ui.dpi(act, 8);
-        row.addView(avatar, alp);
-
-        LinearLayout col = new LinearLayout(act);
-        col.setOrientation(LinearLayout.VERTICAL);
-
-        TextView think = new TextView(act);
-        think.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 11.5f));
-        think.setLineSpacing(0, 1.2f);
-        think.setTextColor(t.alpha(t.textPri, 0.55f));
-        int tpad = Ui.dpi(act, 10);
-        think.setPadding(tpad, tpad - 2, tpad, tpad - 2);
-        think.setBackground(Ui.round(t.alpha(t.textPri, 0.05f), Ui.dpi(act, 10)));
-        think.setVisibility(View.GONE);
-        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        tlp.bottomMargin = Ui.dpi(act, 5);
-        tlp.rightMargin = Ui.dpi(act, 34);
-        col.addView(think, tlp);
-
-        TextView tv = new TextView(act);
-        tv.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.spi(act, 14.5f));
-        tv.setLineSpacing(0, 1.3f);
-        tv.setMovementMethod(LinkMovementMethod.getInstance());
-        tv.setHighlightColor(t.alpha(t.accent, 0.26f));
-        int pad = Ui.dpi(act, 13);
-        tv.setPadding(pad, pad - 3, pad, pad - 3);
-        tv.setBackground(Ui.radii(t.surfaceAlt, Ui.dpi(act, 4), Ui.dpi(act, 17),
-                Ui.dpi(act, 17), Ui.dpi(act, 17)));
-
-        String raw = m.content == null ? "" : m.content;
-        boolean showThink = Prefs.get(act).showThink();
-        String thinkText = null, answerText;
-        int ta = idxOf(raw, "<think>");
-        if (showThink && ta >= 0) {
-            int tb = idxOf(raw, "</think>", ta + 7);
-            thinkText = tb >= 0 ? raw.substring(ta + 7, tb) : raw.substring(ta + 7);
-            answerText = tb >= 0 ? raw.substring(tb + 8) : "";
-        } else {
-            answerText = stripThink(raw);
-        }
-        if (thinkText != null && !thinkText.trim().isEmpty()) {
-            applyThinkBlock(think, "think|" + m.ts, thinkText);
-        }
-        CharSequence rendered;
-        java.util.List<View> richTables = null;
-        try {
-            if (!streaming) {
-                // 完整答案：富文本分段渲染（表格 → 可滚动视图，紧邻文本）
-                Markdown.RichResult rr = Markdown.prepareRich(act, answerText, t);
-                rendered = rr.text;
-                richTables = rr.views;
-            } else {
-                rendered = Markdown.render(act, answerText.isEmpty() ? "▍" : answerText, t);
-            }
-        } catch (Throwable e) {
-            rendered = answerText;
-        }
-        tv.setText(rendered);
-        tv.setVisibility(answerText.isEmpty() && !streaming ? View.GONE : View.VISIBLE);
-        col.addView(tv, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        if (richTables != null && !richTables.isEmpty()) {
-            for (View tvT : richTables) {
-                LinearLayout.LayoutParams tableLp = new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                tableLp.topMargin = Ui.dpi(act, 3);
-                tableLp.rightMargin = Ui.dpi(act, 30);
-                col.addView(tvT, tableLp);
-            }
-        }
-
-        TextView meta = new TextView(act);
-        StringBuilder mt = new StringBuilder(tf.format(new java.util.Date(m.ts)));
-        if (m.evalTokens > 0 && m.tps > 0) mt.append(" · ").append(m.evalTokens)
-                .append(" tok · ").append(String.format(java.util.Locale.US, "%.1f tok/s", m.tps));
-        if (!m.content.isEmpty()) mt.append(" · ").append(modelShort());
-        meta.setText(mt);
-        meta.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 9.5f));
-        meta.setTextColor(t.alpha(t.textSec, 0.9f));
-        meta.setPadding(Ui.dpi(act, 5), Ui.dpi(act, 3), Ui.dpi(act, 4), 0);
-        meta.setOnLongClickListener(v -> {
-            msgMenu(m, true);
-            return true;
-        });
-        col.addView(meta);
-
-        row.addView(col, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        LinearLayout.LayoutParams tvlp = (LinearLayout.LayoutParams) tv.getLayoutParams();
-        tvlp.rightMargin = Ui.dpi(act, 34);
-        tv.setLayoutParams(tvlp);
-
-        row.setTag(new AiHolder(think, tv));
-        // 登记到流式刷新注册表：流式期间重建列表后仅重新绑定正在生成的气泡，避免误绑旧消息
-        if (!streaming || m == streamMsg) streamViews.put(System.identityHashCode(m), new AiHolder(think, tv));
-        if (pendingRegister && m == streamMsg) { pendingRegister = false; markDirty(); }
-        row.setOnLongClickListener(vv -> {
-            msgMenu(m, true);
-            return true;
-        });
-        return row;
-    }
-
-    private static final java.util.HashSet<String> expandedCards = new java.util.HashSet<>();
-
-    private View buildSmallCard(View cv, final ConvStore.Msg m) {
-        LinearLayout wrap = new LinearLayout(act);
-        wrap.setOrientation(LinearLayout.VERTICAL);
-        wrap.setPadding(Ui.dpi(act, 30), Ui.dpi(act, 3), Ui.dpi(act, 8), Ui.dpi(act, 3));
-
-        boolean isTool = "tool".equals(m.role);
-        final String key = m.ts + "|" + m.role + "|" + (m.toolName == null ? "" : m.toolName);
-        TextView card = new TextView(act);
-        card.setTextColor(isTool ? t.alpha(t.ok, 0.95f) : t.alpha(t.danger, 0.95f));
-        card.setTypeface(isTool ? Ui.mono() : Typeface.DEFAULT);
-        card.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 11));
-        card.setBackground(Ui.round(t.alpha(isTool ? t.ok : t.danger, 0.07f), Ui.dpi(act, 10)));
-        int cpad = Ui.dpi(act, 9);
-        card.setPadding(cpad, cpad - 3, cpad, cpad - 3);
-
-        Runnable apply = () -> {
-            boolean expanded = expandedCards.contains(key);
-            if (isTool && !expanded) {
-                String head = m.content.replace('\n', ' ').trim();
-                if (head.length() > 60) head = head.substring(0, 60) + "…";
-                card.setText("[" + m.toolName + "] " + head);
-                card.setMaxLines(1);
-            } else {
-                card.setText((isTool ? "[" + m.toolName + "]\n" : "") + m.content);
-                card.setMaxLines(Integer.MAX_VALUE);
-            }
-        };
-        apply.run();
-        wrap.addView(card, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        if (isTool) wrap.setOnClickListener(v -> {
-            if (!expandedCards.remove(key)) expandedCards.add(key);
-            apply.run();
-        });
-        wrap.setOnLongClickListener(vv -> {
-            msgMenu(m, false);
-            return true;
-        });
-        return wrap;
-    }
-
-    private void editSystemPrompt() {
-        t = Theme.of(act);
-        final Prefs p = Prefs.get(act);
-        LinearLayout box = new LinearLayout(act);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.addView(Ui.title(act, t, "系统提示词"));
-        box.addView(Ui.gap(act, 4));
-        box.addView(Ui.caption(act, t, "叠加在人设卡与 Skill 之上的全局指令，对所有会话生效"));
-        box.addView(Ui.gap(act, 10));
-        final EditText et = Ui.input(act, t, "例如：回答保持简洁，始终使用中文", true);
-        et.setMinLines(4);
-        et.setText(p.sysPrompt());
-        box.addView(et);
-        box.addView(Ui.gap(act, 12));
-        LinearLayout btns = new LinearLayout(act);
-        btns.setOrientation(LinearLayout.HORIZONTAL);
-        TextView clearB = Ui.btnGhost(act, t, "清空");
-        TextView saveB = Ui.btnPrimary(act, t, "保存");
-        Dialog[] w = new Dialog[1];
-        clearB.setOnClickListener(v -> et.setText(""));
-        saveB.setOnClickListener(v -> {
-            p.sysPrompt(et.getText().toString().trim());
-            updateChips();
-            w[0].dismiss();
-            Ui.toast(act, "已保存");
-        });
-        LinearLayout.LayoutParams l1 = new LinearLayout.LayoutParams(0,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        l1.rightMargin = Ui.dpi(act, 8);
-        btns.addView(clearB, l1);
-        btns.addView(saveB, new LinearLayout.LayoutParams(0,
-                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        box.addView(btns);
-        w[0] = Ui.center(act, box, t);
-        w[0].show();
-    }
-
-    private String modelShort() {
+    String modelShort() {
         if (model.contains("/")) return model.substring(model.lastIndexOf('/') + 1);
         return model;
     }
 
-    private void msgMenu(final ConvStore.Msg m, boolean allowRegen) {
-        t = Theme.of(act);
-        LinearLayout box = new LinearLayout(act);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.addView(Ui.title(act, t, "消息操作"));
-        box.addView(Ui.gap(act, 8));
-        final Dialog[] d = new Dialog[1];
-        addMenuItem(box, "复制全文", "copy", () -> Ui.copy(act, m.content));
-        addMenuItem(box, "选择文本", "edit", () -> showTextSelect(m));
-        addMenuItem(box, "朗读此消息", "voice", () -> {
-            if (m.content == null || m.content.trim().isEmpty()) {
-                Ui.toast(act, "该消息无内容可朗读");
-                return;
-            }
-            TtsEngine.get(act).speak(m.content);
-            d[0].dismiss();
-        });
-        addMenuItem(box, "停止朗读", "stop", () -> {
-            TtsEngine.get(act).stop();
-            d[0].dismiss();
-        });
-        if (allowRegen) addMenuItem(box, "重新生成本回复", "refresh", this::regenerate);
-        addMenuItem(box, "删除该消息", "trash", () -> deleteMsg(m));
-        d[0] = Ui.center(act, box, t);
-        d[0].show();
-    }
-
-    private void addMenuItem(LinearLayout box, String label, String iconName, Runnable r) {
-        TextView it = new TextView(act);
-        it.setText(label);
-        if (iconName != null) Icon.pinLeft(it, iconName, 15);
-        it.setTextColor(t.textPri);
-        it.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 14));
-        it.setPadding(Ui.dpi(act, 6), Ui.dpi(act, 12), Ui.dpi(act, 6), Ui.dpi(act, 12));
-        it.setBackground(Ui.ripple(Ui.round(Color.TRANSPARENT, Ui.dpi(act, 8)), t.alpha(t.textPri, 0.1f)));
-        it.setOnClickListener(v -> r.run());
-        box.addView(it);
-    }
-
     /** 删除一条消息（流式中禁止） */
-    private void deleteMsg(final ConvStore.Msg m) {
+    void deleteMsg(final ConvStore.Msg m) {
         if (streaming) return;
         conv.msgs.remove(m);
         ConvStore.save(act, conv);
@@ -2264,7 +1863,7 @@ public class ChatPage extends Page {
     }
 
     /** 读取人设头像为圆形 Drawable；无头像/读取失败返回 null */
-    private Drawable loadAvatar(String path, float dp) {
+    Drawable loadAvatar(String path, float dp) {
         if (path == null || path.isEmpty()) return null;
         try {
             Bitmap b = BitmapFactory.decodeFile(path);
@@ -2284,7 +1883,7 @@ public class ChatPage extends Page {
     }
 
     /** 打开系统图片选择器，选中后复制到应用私有目录并设为当前人设头像 */
-    private void pickAvatar(final Personas.P p, final ImageView preview) {
+    void pickAvatar(final Personas.P p, final ImageView preview) {
         avatarTarget = p;
         avatarPreview = preview;
         Intent i = new Intent(Intent.ACTION_GET_CONTENT);
@@ -2297,489 +1896,12 @@ public class ChatPage extends Page {
     }
 
 
-    private void modelSheet() {
-        t = Theme.of(act);
-        LinearLayout box = new LinearLayout(act);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.addView(Ui.title(act, t, Prefs.get(act).cloudMode() ? "云端模型" : "本地模型"));
-        box.addView(Ui.gap(act, 4));
-        box.addView(Ui.caption(act, t, models.isEmpty() ? "未获取到模型列表" : "共 " + models.size() + " 个模型"));
-        box.addView(Ui.gap(act, 6));
-
-        final Dialog[] dlgBox = new Dialog[1];
-        ListView lv = new ListView(act);
-        lv.setDivider(null);
-        lv.setAdapter(new BaseAdapter() {
-            @Override public int getCount() { return models.size(); }
-            @Override public Object getItem(int i) { return models.get(i); }
-            @Override public long getItemId(int i) { return i; }
-            @SuppressLint("SetTextI18n")
-            @Override public View getView(int i, View cv, ViewGroup parent) {
-                LinearLayout row = cv instanceof LinearLayout ? (LinearLayout) cv : Ui.row(act, t);
-                while (row.getChildCount() < 3) row.addView(new TextView(act));
-                TextView radio = (TextView) row.getChildAt(0);
-                String name = models.get(i);
-                radio.setText("");
-                radio.setTextColor(name.equals(model) ? t.accent : t.textSec);
-                Icon.pinLeft(radio, name.equals(model) ? "radioOn" : "radioOff", 16);
-                radio.setPadding(0, 0, Ui.dpi(act, 10), 0);
-                TextView nameTv = (TextView) row.getChildAt(1);
-                nameTv.setText(name);
-                nameTv.setTextColor(t.textPri);
-                nameTv.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 13));
-                nameTv.setLayoutParams(new LinearLayout.LayoutParams(0,
-                        ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-                // 右侧显示服务商来源标签
-                TextView srcTv = (TextView) row.getChildAt(2);
-                String provider = "";
-                if (i < modelEntries.size()) provider = modelEntries.get(i).provider;
-                srcTv.setText(provider.isEmpty() ? "" : provider);
-                srcTv.setTextColor(t.alpha(t.accent, 0.7f));
-                srcTv.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 10));
-                srcTv.setPadding(Ui.dpi(act, 8), 0, 0, 0);
-                srcTv.setBackgroundResource(0);
-                row.setOnClickListener(v -> {
-                    model = name;
-                    applyActiveModel(name);
-                    updateChips();
-                    dlgBox[0].dismiss();
-                });
-                return row;
-            }
-        });
-        box.addView(lv, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dpi(act, 300)));
-
-        box.addView(Ui.gap(act, 8));
-        LinearLayout customRow = new LinearLayout(act);
-        customRow.setOrientation(LinearLayout.HORIZONTAL);
-        EditText et = Ui.input(act, t, "手动输入模型名", false);
-        customRow.addView(et, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        TextView ok = Ui.btnGhost(act, t, "使用");
-        ok.setOnClickListener(v -> {
-            String s = et.getText().toString().trim();
-            if (s.isEmpty()) return;
-            if (!models.contains(s)) {
-                models.add(s);
-                // 手动添加的模型使用全局 cloudUrl/cloudKey
-                modelEntries.add(new ModelEntry(s, "手动", Prefs.get(act).cloudUrl(), Prefs.get(act).cloudKey()));
-            }
-            model = s;
-            applyActiveModel(s);
-            updateChips();
-            dlgBox[0].dismiss();
-        });
-        customRow.addView(ok);
-        LinearLayout.LayoutParams olp = (LinearLayout.LayoutParams) ok.getLayoutParams();
-        olp.leftMargin = Ui.dpi(act, 8);
-        olp.gravity = Gravity.CENTER_VERTICAL;
-        box.addView(customRow);
-
-        dlgBox[0] = Ui.sheet(act, box, t);
-        dlgBox[0].show();
-        if (models.isEmpty()) loadModels();
-    }
-
-    private void applyActiveModel(String name) {
+    void applyActiveModel(String name) {
         Prefs p = Prefs.get(act);
         if (p.cloudMode()) p.activeCloudModel(name);
         else p.activeModel(name);
         if (conv != null) conv.model = name;
     }
-
-    private void personaSheet() {
-        t = Theme.of(act);
-        LinearLayout box = new LinearLayout(act);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.addView(Ui.title(act, t, "人设卡"));
-        box.addView(Ui.caption(act, t, "为人设注入系统提示词，塑造 AI 的性格与专长"));
-        box.addView(Ui.gap(act, 8));
-
-        ListView lv = new ListView(act);
-        lv.setDivider(null);
-        lv.setAdapter(new BaseAdapter() {
-            @Override public int getCount() { return personas.size(); }
-            @Override public Object getItem(int i) { return personas.get(i); }
-            @Override public long getItemId(int i) { return i; }
-            @SuppressLint("SetTextI18n")
-            @Override public View getView(int i, View cv, ViewGroup parent) {
-                final Personas.P p = personas.get(i);
-                LinearLayout row = cv instanceof LinearLayout ? (LinearLayout) cv : Ui.row(act, t);
-                if (row.getChildCount() == 0) {
-                    TextView emoji = new TextView(act);
-                    emoji.setGravity(Gravity.CENTER);
-                    LinearLayout.LayoutParams elp = new LinearLayout.LayoutParams(Ui.dpi(act, 38), Ui.dpi(act, 38));
-                    elp.rightMargin = Ui.dpi(act, 12);
-                    emoji.setLayoutParams(elp);
-                    row.addView(emoji);
-                    LinearLayout midCol = new LinearLayout(act);
-                    midCol.setOrientation(LinearLayout.VERTICAL);
-                    midCol.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-                    row.addView(midCol);
-                    TextView radio = new TextView(act);
-                    radio.setPadding(Ui.dpi(act, 8), 0, 0, 0);
-                    row.addView(radio);
-                }
-                TextView emoji = (TextView) row.getChildAt(0);
-                emoji.setText(p.emoji);
-                emoji.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 16));
-                emoji.setTextColor(t.accent);
-                emoji.setBackground(Ui.round(t.alpha(t.accent, 0.08f), Ui.dpi(act, 12)));
-                LinearLayout midCol = (LinearLayout) row.getChildAt(1);
-                while (midCol.getChildCount() < 2) {
-                    TextView a = new TextView(act);
-                    TextView b = new TextView(act);
-                    midCol.addView(a);
-                    midCol.addView(b);
-                }
-                TextView name = (TextView) midCol.getChildAt(0);
-                name.setText(p.name);
-                name.setTextColor(t.textPri);
-                name.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 14));
-                name.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-                TextView desc = (TextView) midCol.getChildAt(1);
-                desc.setText(p.desc.isEmpty() ? p.prompt : p.desc);
-                desc.setTextColor(t.textSec);
-                desc.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 11));
-                desc.setMaxLines(1);
-                TextView radio = (TextView) row.getChildAt(2);
-                boolean sel = persona != null && persona.id.equals(p.id);
-                radio.setText("");
-                radio.setTextColor(t.accent);
-                Icon.pinLeft(radio, sel ? "radioOn" : "radioOff", 16);
-                row.setOnClickListener(v -> {
-                    persona = (persona != null && persona.id.equals(p.id)) ? null : p;
-                    if (conv != null) conv.personaId = persona != null ? persona.id : "";
-                    updateChips();
-                    pd.dismiss();
-                });
-                row.setOnLongClickListener(v -> {
-                    editPersona(p);
-                    return true;
-                });
-                return row;
-            }
-        });
-        box.addView(lv, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dpi(act, 320)));
-        box.addView(Ui.gap(act, 6));
-
-        LinearLayout foot = new LinearLayout(act);
-        foot.setOrientation(LinearLayout.HORIZONTAL);
-        TextView manage = Ui.btnGhost(act, t, "管理人设");
-        manage.setOnClickListener(v -> managePersonas());
-        TextView create = Ui.btnPrimary(act, t, "+ 新建");
-        create.setOnClickListener(v -> editPersona(Personas.blank()));
-        LinearLayout.LayoutParams l1 = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        l1.rightMargin = Ui.dpi(act, 8);
-        foot.addView(manage, l1);
-        foot.addView(create, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        box.addView(foot);
-
-        pd = Ui.sheet(act, box, t);
-        pd.show();
-    }
-
-    private Dialog pd;
-
-    private void managePersonas() {
-        t = Theme.of(act);
-        LinearLayout box = new LinearLayout(act);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.addView(Ui.title(act, t, "管理人格设定卡"));
-        box.addView(Ui.gap(act, 8));
-        ListView lv = new ListView(act);
-        lv.setDivider(null);
-        lv.setAdapter(new BaseAdapter() {
-            @Override public int getCount() { return personas.size(); }
-            @Override public Object getItem(int i) { return personas.get(i); }
-            @Override public long getItemId(int i) { return i; }
-            @Override public View getView(int i, View cv, ViewGroup parent) {
-                final Personas.P p = personas.get(i);
-                LinearLayout row = cv instanceof LinearLayout ? (LinearLayout) cv : Ui.row(act, t);
-                while (row.getChildCount() < 3) row.addView(new TextView(act));
-                TextView name = (TextView) row.getChildAt(0);
-                name.setText(p.emoji + "  " + p.name);
-                name.setTextColor(t.textPri);
-                name.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 13.5f));
-                name.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-                TextView edit = (TextView) row.getChildAt(1);
-                edit.setText("编辑");
-                edit.setTextColor(t.accent);
-                edit.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 12));
-                edit.setPadding(0, 0, Ui.dpi(act, 14), 0);
-                edit.setOnClickListener(v -> editPersona(p));
-                TextView del = (TextView) row.getChildAt(2);
-                del.setText("删除");
-                del.setTextColor(t.alpha(t.danger, 0.9f));
-                del.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 12));
-                del.setOnClickListener(v -> {
-                    confirmDeletePersona(p);
-                });
-                row.setOnClickListener(v -> editPersona(p));
-                return row;
-            }
-        });
-        box.addView(lv, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dpi(act, 330)));
-        md = Ui.sheet(act, box, t);
-        md.show();
-    }
-
-    private Dialog md;
-
-    private void confirmDeletePersona(Personas.P p) {
-        t = Theme.of(act);
-        LinearLayout box = new LinearLayout(act);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.addView(Ui.title(act, t, "删除「" + p.name + "」？"));
-        box.addView(Ui.gap(act, 6));
-        box.addView(Ui.caption(act, t, "该人设卡将被移除"));
-        box.addView(Ui.gap(act, 14));
-        LinearLayout btns = new LinearLayout(act);
-        btns.setOrientation(LinearLayout.HORIZONTAL);
-        TextView no = Ui.btnGhost(act, t, "取消");
-        TextView yes = Ui.btnPrimary(act, t, "删除");
-        yes.setBackground(Ui.round(t.danger, Ui.dpi(act, 13)));
-        yes.setTextColor(0xFFFFFFFF);
-        Dialog[] w = new Dialog[1];
-        no.setOnClickListener(v -> w[0].dismiss());
-        yes.setOnClickListener(v -> {
-            personas.remove(p);
-            Personas.saveAll(act, personas);
-            if (persona != null && persona.id.equals(p.id)) persona = null;
-            updateChips();
-            w[0].dismiss();
-            Ui.toast(act, "已删除");
-            if (md != null && md.isShowing()) {
-                md.dismiss();
-                Ui.H.postDelayed(this::managePersonas, 80);
-            }
-        });
-        LinearLayout.LayoutParams l1 = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        l1.rightMargin = Ui.dpi(act, 8);
-        btns.addView(no, l1);
-        btns.addView(yes, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        box.addView(btns);
-        w[0] = Ui.center(act, box, t);
-        w[0].show();
-    }
-
-    private void editPersona(final Personas.P p) {
-        t = Theme.of(act);
-        LinearLayout box = new LinearLayout(act);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.addView(Ui.title(act, t, p.name.isEmpty() ? "新建人设" : "编辑人设"));
-        box.addView(Ui.gap(act, 10));
-
-        final EditText nameE = Ui.input(act, t, "名称", false);
-        nameE.setText(p.name);
-        box.addView(nameE);
-        box.addView(Ui.gap(act, 7));
-        // 头像：选择/上传图片，显示在 AI 气泡与空状态大图
-        LinearLayout avRow = new LinearLayout(act);
-        avRow.setOrientation(LinearLayout.HORIZONTAL);
-        avRow.setGravity(Gravity.CENTER_VERTICAL);
-        FrameLayout avCircle = new FrameLayout(act);
-        avCircle.setBackground(Ui.round(t.alpha(t.accent, 0.08f), Ui.dpi(act, 999)));
-        final ImageView avImg = new ImageView(act);
-        Drawable avd = loadAvatar(p.avatar, 56);
-        avImg.setImageDrawable(avd != null ? avd : Icon.v(act, "avatar", t.accent, 40));
-        avCircle.addView(avImg, new FrameLayout.LayoutParams(Ui.dpi(act, 56), Ui.dpi(act, 56), Gravity.CENTER));
-        avRow.addView(avCircle, new LinearLayout.LayoutParams(Ui.dpi(act, 64), Ui.dpi(act, 64)));
-        LinearLayout avBtns = new LinearLayout(act);
-        avBtns.setOrientation(LinearLayout.VERTICAL);
-        TextView pick = Ui.btnGhost(act, t, "选择图片");
-        pick.setOnClickListener(v -> pickAvatar(p, avImg));
-        avBtns.addView(pick);
-        avBtns.addView(Ui.gap(act, 6));
-        TextView clear = Ui.btnGhost(act, t, "清除头像");
-        clear.setOnClickListener(v -> {
-            p.avatar = "";
-            avImg.setImageDrawable(Icon.v(act, "avatar", t.accent, 40));
-        });
-        avBtns.addView(clear);
-        avRow.addView(avBtns, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        box.addView(avRow);
-        box.addView(Ui.gap(act, 7));
-
-        final EditText emojiE = Ui.input(act, t, "图标（一个字符）", false);
-        emojiE.setText(p.emoji);
-        box.addView(emojiE);
-        box.addView(Ui.gap(act, 7));
-        final EditText descE = Ui.input(act, t, "简介", false);
-        descE.setText(p.desc);
-        box.addView(descE);
-        box.addView(Ui.gap(act, 7));
-        final EditText promptE = Ui.input(act, t, "系统提示词（人设核心）", true);
-        promptE.setMinLines(4);
-        promptE.setText(p.prompt);
-        box.addView(promptE);
-        box.addView(Ui.gap(act, 12));
-
-        LinearLayout btns = new LinearLayout(act);
-        btns.setOrientation(LinearLayout.HORIZONTAL);
-        TextView cancel = Ui.btnGhost(act, t, "取消");
-        TextView save = Ui.btnPrimary(act, t, "保存");
-        Dialog[] w = new Dialog[1];
-        cancel.setOnClickListener(v -> w[0].dismiss());
-        save.setOnClickListener(v -> {
-            p.name = nameE.getText().toString().trim();
-            p.emoji = emojiE.getText().toString().trim();
-            p.desc = descE.getText().toString().trim();
-            p.prompt = promptE.getText().toString().trim();
-            if (!personas.contains(p)) personas.add(p);
-            Personas.saveAll(act, personas);
-            if (persona != null && persona.id.equals(p.id)) persona = p;
-            updateChips();
-            w[0].dismiss();
-            Ui.toast(act, "已保存");
-        });
-        LinearLayout.LayoutParams l1 = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        l1.rightMargin = Ui.dpi(act, 8);
-        btns.addView(cancel, l1);
-        btns.addView(save, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        box.addView(btns);
-        w[0] = Ui.center(act, box, t);
-        w[0].show();
-    }
-
-    /** 用户自主编辑会话命名：弹出输入框修改指定会话标题 */
-    private void renameConvDialog(final ConvStore.Conv c, final ListView lv, final List<ConvStore.Conv> all) {
-        t = Theme.of(act);
-        LinearLayout box = new LinearLayout(act);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.addView(Ui.title(act, t, "重命名会话"));
-        box.addView(Ui.gap(act, 5));
-        box.addView(Ui.caption(act, t, "修改后立即生效，标题不超过 18 字"));
-        box.addView(Ui.gap(act, 10));
-        final EditText et = Ui.input(act, t, "会话标题", false);
-        et.setText(c.title);
-        et.requestFocus();
-        box.addView(et);
-        box.addView(Ui.gap(act, 12));
-        LinearLayout btns = new LinearLayout(act);
-        btns.setOrientation(LinearLayout.HORIZONTAL);
-        TextView cancel = Ui.btnGhost(act, t, "取消");
-        TextView ok = Ui.btnPrimary(act, t, "确定");
-        Dialog[] w = new Dialog[1];
-        cancel.setOnClickListener(v -> w[0].dismiss());
-        ok.setOnClickListener(v -> {
-            String name = et.getText().toString().trim();
-            if (name.isEmpty()) {
-                Ui.toast(act, "标题不能为空");
-                return;
-            }
-            if (name.length() > 18) name = name.substring(0, 17) + "…";
-            c.title = name;
-            ConvStore.save(act, c);
-            if (conv != null && conv.id.equals(c.id)) {
-                conv.title = name;
-                ConvStore.save(act, conv);
-            }
-            if (lv.getAdapter() != null) ((BaseAdapter) lv.getAdapter()).notifyDataSetChanged();
-            w[0].dismiss();
-            Ui.toast(act, "已重命名为：" + name);
-        });
-        LinearLayout.LayoutParams l1 = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        l1.rightMargin = Ui.dpi(act, 8);
-        btns.addView(cancel, l1);
-        btns.addView(ok, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        box.addView(btns);
-        w[0] = Ui.sheet(act, box, t);
-        w[0].show();
-    }
-
-    private void historySheet() {
-        t = Theme.of(act);
-        LinearLayout box = new LinearLayout(act);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.addView(Ui.title(act, t, "历史会话"));
-        box.addView(Ui.gap(act, 8));
-
-        final List<ConvStore.Conv> all = new ArrayList<>();
-        final TextView emptyTip = Ui.caption(act, t, "加载中…");
-        box.addView(emptyTip);
-        ListView lv = new ListView(act);
-        lv.setDivider(null);
-        final BaseAdapter ad = new BaseAdapter() {
-            @Override public int getCount() { return all.size(); }
-            @Override public Object getItem(int i) { return all.get(i); }
-            @Override public long getItemId(int i) { return i; }
-            @SuppressLint("SetTextI18n")
-            @Override public View getView(int i, View cv, ViewGroup parent) {
-                final ConvStore.Conv c = all.get(i);
-                LinearLayout row = cv instanceof LinearLayout ? (LinearLayout) cv : Ui.row(act, t);
-                if (row.getChildCount() == 0) {
-                    LinearLayout midCol = new LinearLayout(act);
-                    midCol.setOrientation(LinearLayout.VERTICAL);
-                    midCol.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-                    row.addView(midCol);
-                    TextView del = new TextView(act);
-                    row.addView(del);
-                    TextView delBtn = new TextView(act);
-                    row.addView(delBtn);
-                }
-                LinearLayout midCol = (LinearLayout) row.getChildAt(0);
-                while (midCol.getChildCount() < 2) {
-                    TextView a = new TextView(act);
-                    TextView b = new TextView(act);
-                    midCol.addView(a);
-                    midCol.addView(b);
-                }
-                TextView title = (TextView) midCol.getChildAt(0);
-                title.setText(c.title);
-                title.setTextColor(c.id.equals(conv == null ? "" : conv.id) ? t.accent : t.textPri);
-                title.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 13.5f));
-                TextView sub = (TextView) midCol.getChildAt(1);
-                SimpleDateFormat df = new SimpleDateFormat("MM-dd HH:mm", Locale.getDefault());
-                sub.setText(df.format(new Date(c.updated)) + " · " + c.msgs.size() + " 条" +
-                        (c.model.isEmpty() ? "" : " · " + c.model));
-                sub.setTextColor(t.textSec);
-                sub.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 11));
-                TextView del = (TextView) row.getChildAt(1);
-                del.setText("重命名");
-                del.setTextColor(t.accent);
-                del.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 12));
-                del.setPadding(Ui.dpi(act, 4), 0, Ui.dpi(act, 4), 0);
-                del.setOnClickListener(v -> renameConvDialog(c, lv, all));
-                TextView delBtn = (TextView) row.getChildAt(2);
-                delBtn.setText("删除");
-                delBtn.setTextColor(t.alpha(t.danger, 0.9f));
-                delBtn.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 12));
-                delBtn.setPadding(Ui.dpi(act, 4), 0, 0, 0);
-                delBtn.setOnClickListener(v -> {
-                    ConvStore.delete(act, c.id);
-                    if (conv != null && conv.id.equals(c.id)) conv = null;
-                    refreshViews();
-                    refreshEmpty();
-                    hd.dismiss();
-                    Ui.toast(act, "已删除");
-                });
-                row.setOnClickListener(v -> {
-                    ConvStore.Conv loaded = ConvStore.load(act, c.id);
-                    if (loaded != null) loadConv(loaded);
-                    hd.dismiss();
-                });
-                return row;
-            }
-        };
-        lv.setAdapter(ad);
-        box.addView(lv, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dpi(act, 360)));
-
-        hd = Ui.sheet(act, box, t);
-        hd.show();
-        // 独立线程加载历史列表；flush 为无死锁实现，等待有界，不会再卡住“加载中…”
-        new Thread(() -> {
-            ConvStore.flush(1500);
-            final List<ConvStore.Conv> got = ConvStore.list(act);
-            Ui.H.post(() -> {
-                all.addAll(got);
-                emptyTip.setText("暂无历史会话");
-                emptyTip.setVisibility(all.isEmpty() ? View.VISIBLE : View.GONE);
-                ad.notifyDataSetChanged();
-            });
-        }, "om-history").start();
-    }
-
-    private Dialog hd;
 
     @Override
     public void onShow() {
