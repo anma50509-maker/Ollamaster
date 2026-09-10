@@ -216,7 +216,7 @@ class ChatBubbles {
         for (Object seg : rr.flow) {
             if (seg instanceof View) {
                 LinearLayout.LayoutParams vlp = new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
                 vlp.topMargin = Ui.dpi(act, 2);
                 bodyBox.addView((View) seg, vlp);
             } else {
@@ -226,13 +226,14 @@ class ChatBubbles {
                 chunk.setLineSpacing(0, 1.3f);
                 chunk.setHighlightColor(t.alpha(t.accent, 0.26f));
                 chunk.setTextColor(t.textPri);
+                chunk.setMaxWidth(Ui.dpi(act, 272));
                 if (firstText == null) {
                     firstText = chunk;
                     bodyBox.addView(chunk, new LinearLayout.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+                            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
                 } else {
                     LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                            ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
                     clp.topMargin = Ui.dpi(act, 6);
                     bodyBox.addView(chunk, clp);
                 }
@@ -250,7 +251,7 @@ class ChatBubbles {
             return true;
         });
         LinearLayout.LayoutParams bodyLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         bodyLp.rightMargin = Ui.dpi(act, 34);
         col.addView(bodyBox, bodyLp);
 
@@ -272,9 +273,9 @@ class ChatBubbles {
         row.addView(col, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        row.setTag(new ChatPage.AiHolder(think, firstText));
+        row.setTag(new ChatPage.AiHolder(think, firstText, bodyBox));
         // 登记到流式刷新注册表：流式期间重建列表后仅重新绑定正在生成的气泡，避免误绑旧消息
-        if (!cp.streaming || m == cp.streamMsg) cp.streamViews.put(System.identityHashCode(m), new ChatPage.AiHolder(think, firstText));
+        if (!cp.streaming || m == cp.streamMsg) cp.streamViews.put(System.identityHashCode(m), new ChatPage.AiHolder(think, firstText, bodyBox));
         if (cp.pendingRegister && m == cp.streamMsg) { cp.pendingRegister = false; cp.markDirty(); }
         row.setOnLongClickListener(vv -> {
             cp.dialogs.msgMenu(m, true);

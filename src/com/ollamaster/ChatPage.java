@@ -87,7 +87,10 @@ public class ChatPage extends Page {
     static class AiHolder {
         final TextView think;
         final TextView main;
-        AiHolder(TextView think, TextView main) { this.think = think; this.main = main; }
+        final android.view.View body;
+        AiHolder(TextView think, TextView main, android.view.View body) {
+            this.think = think; this.main = main; this.body = body;
+        }
     }
 
 
@@ -768,6 +771,7 @@ public class ChatPage extends Page {
                 h.think.setOnClickListener(null);
                 h.think.setText("思考中…\n" + tailOf(thinkText));
                 h.main.setVisibility(View.GONE);
+                if (h.body != null) h.body.setVisibility(View.GONE);
                 next = tailOf(thinkText);
             } else {
                 if (showThink && thinkText != null && !thinkText.trim().isEmpty()) {
@@ -776,6 +780,7 @@ public class ChatPage extends Page {
                     h.think.setVisibility(View.GONE);
                 }
                 h.main.setVisibility(View.VISIBLE);
+                if (h.body != null) h.body.setVisibility(View.VISIBLE);
                 next = answerText.isEmpty() ? "▍" : tailOf(answerText) + " ▍";
                 // 流式实时 MD 渲染：加粗/标题/代码等格式随输入即时呈现
                 h.main.setText(Markdown.render(act, next, t));
