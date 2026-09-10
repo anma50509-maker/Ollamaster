@@ -91,7 +91,7 @@ public class LocalTools {
                 null, null, null));
         out.put(fn2("get_setting", "读取单个设置项的当前值",
                 new String[]{"key"}, new String[]{"设置键名，如 temperature / ttsMode / autoTts"}, new String[]{"key"}));
-        out.put(fn2("set_setting", "修改应用设置（AI 自行配置入口）。支持键：host,port,timeoutSec,retryMax,editMode,themeName,customTheme,cBg,cAccent,cText,fontScale,stream,showThink,streamDiag,temperature,topP,maxTokens,ctxMsgs,summaryKb,sysPrompt,cloudMode,cloudUrl,cloudKey,cloudModels,activeModel,activeCloudModel,ttsMode,ttsUrl,ttsKey,ttsModel,ttsVoice,ttsSpeed,autoTts,activeKeyIndex,apiKeyPool,workspace,imgEnabled,imgUrl,imgKey,imgModel,imgSize,imgStyle,imgDir,imgVisionModel,visionMode,visionUrl,visionKey,visionModelId,autoTitle",
+        out.put(fn2("set_setting", "修改应用设置（AI 自行配置入口）。支持键：host,hosts,port,timeoutSec,retryMax,editMode,themeName,customTheme,cBg,cAccent,cText,fontScale,stream,showThink,streamDiag,temperature,topP,maxTokens,ctxMsgs,summaryKb,sysPrompt,cloudMode,cloudUrl,cloudKey,cloudModels,activeModel,activeCloudModel,ttsMode,ttsUrl,ttsKey,ttsModel,ttsVoice,ttsSpeed,autoTts,activeKeyIndex,apiKeyPool,workspace,imgEnabled,imgUrl,imgKey,imgModel,imgSize,imgStyle,imgDir,imgVisionModel,visionMode,visionUrl,visionKey,visionModelId,autoTitle",
                 new String[]{"key", "value"},
                 new String[]{"设置键名（见描述）", "设置值：布尔用 true/false，数字用数值，字符串直接填写"},
                 new String[]{"key", "value"}));
@@ -294,6 +294,7 @@ public class LocalTools {
         Prefs p = Prefs.get(App.inst);
         StringBuilder sb = new StringBuilder("应用设置清单（键 = 当前值）：\n");
         sb.append("host = ").append(p.host()).append("\n");
+        sb.append("hosts = ").append(joinHosts(p.hosts())).append("（历史服务地址）\n");
         sb.append("port = ").append(p.port()).append("\n");
         sb.append("timeoutSec = ").append(p.timeoutSec()).append("\n");
         sb.append("retryMax = ").append(p.retryMax()).append("\n");
@@ -351,6 +352,7 @@ public class LocalTools {
         Prefs p = Prefs.get(App.inst);
         switch (k) {
             case "host": return "host = " + p.host();
+            case "hosts": return "hosts = " + joinHosts(p.hosts());
             case "port": return "port = " + p.port();
             case "timeoutSec": return "timeoutSec = " + p.timeoutSec();
             case "retryMax": return "retryMax = " + p.retryMax();
@@ -410,6 +412,13 @@ public class LocalTools {
         Prefs p = Prefs.get(App.inst);
         switch (k) {
             case "host": p.host(v); break;
+            case "hosts": {
+                java.util.ArrayList<String> list = new java.util.ArrayList<>();
+                for (String h : v.split("[,，]")) if (!h.trim().isEmpty()) list.add(h.trim());
+                if (list.isEmpty()) throw new Exception("hosts 需要至少一个地址（逗号分隔）");
+                p.hosts(list);
+                break;
+            }
             case "port": p.port(parseInt(v, "port")); break;
             case "timeoutSec": p.timeoutSec(parseInt(v, "timeoutSec")); break;
             case "retryMax": p.retryMax(parseInt(v, "retryMax")); break;
@@ -488,6 +497,16 @@ public class LocalTools {
         if ("true".equals(s) || "1".equals(s) || "yes".equals(s) || "on".equals(s)) return true;
         if ("false".equals(s) || "0".equals(s) || "no".equals(s) || "off".equals(s)) return false;
         throw new Exception(k + " 需要 true/false，收到: " + v);
+    }
+
+    /** 历史 host 列表 → 逗号分隔字符串 */
+    private static String joinHosts(java.util.ArrayList<String> list) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < list.size(); i++) {
+            if (i > 0) sb.append(", ");
+            sb.append(list.get(i));
+        }
+        return sb.toString();
     }
 
     /** int 颜色 → #RRGGBB（供 list_settings / get_setting 可读输出） */
