@@ -298,8 +298,8 @@ public class SettingsPage extends Page {
                 ViewGroup.LayoutParams.MATCH_PARENT, Math.max(1, Ui.dpi(act, 0.7f))));
     }
 
-    private static final String[] PRESET_NAMES = {"inkgold", "rosewood", "celadon", "pine", "obsidian", "moon"};
-    private static final String[] PRESET_LABELS = {"墨金", "紫檀", "黛青", "松烟", "曜石", "月白"};
+    private static final String[] PRESET_NAMES = {"linen", "inkgold", "rosewood", "celadon", "pine", "obsidian", "moon"};
+    private static final String[] PRESET_LABELS = {"米砂", "墨金", "紫檀", "黛青", "松烟", "曜石", "月白"};
 
     private void buildThemeSection(LinearLayout root) {
         LinearLayout card = section(root, "外观与配色");

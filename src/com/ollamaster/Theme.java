@@ -42,8 +42,13 @@ public class Theme {
                 return new Theme(0xFF000000, 0xFF0D0D10, 0xFF15151A, 0x33B39DDB, 0xFFEDEAF5, 0xFF94909F, 0xFFB39DDB, 0xFFC0574F, false);
             case "moon":
                 return new Theme(0xFFF7F5F0, 0xFFFFFFFF, 0xFFF0EDE5, 0x228A6D3B, 0xFF26241F, 0xFF7C776B, 0xFF8A6D3B, 0xFFB04A42, true);
-            default:
+            case "inkgold":
                 return new Theme(0xFF101216, 0xFF171A21, 0xFF20242E, 0x26D4AF6A, 0xFFF2EDE2, 0xFF9AA0AC, 0xFFD4AF6A, 0xFFC0574F, false);
+            case "linen":
+            default:
+                return new Theme(0xFFE0DECF, mix(0xFFE0DECF, 0xFF090000, 0.06f), mix(0xFFE0DECF, 0xFF090000, 0.11f),
+                        (0xFF896461 & 0x00FFFFFF) | 0x33000000, 0xFF090000, mix(0xFF090000, 0xFFE0DECF, 0.42f),
+                        0xFF896461, 0xFFC0574F, true);
         }
     }
 

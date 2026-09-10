@@ -45,7 +45,7 @@ public class Prefs {
     public boolean editMode() { return sp.getBoolean("editMode", true); }
     public void editMode(boolean v) { sp.edit().putBoolean("editMode", v).apply(); }
 
-    public String themeName() { return sp.getString("themeName", "inkgold"); }
+    public String themeName() { return sp.getString("themeName", "linen"); }
     public void themeName(String v) { sp.edit().putString("themeName", v).apply(); }
 
     public boolean customTheme() { return sp.getBoolean("customTheme", false); }
