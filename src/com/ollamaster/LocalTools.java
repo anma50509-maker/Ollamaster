@@ -105,6 +105,10 @@ public class LocalTools {
                 new String[]{"name", "id"},
                 new String[]{"服务商名称（与 id 二选一）", "服务商 id（与 name 二选一，key_pool_list 可查）"},
                 null));
+        out.put(fn2("web_search", "联网搜索：向搜索引擎提交关键词，返回结果列表（标题/链接/摘要）。用于查资料、找答案、了解实时信息；搜索后如需要可再用 web_fetch 打开具体链接看全文",
+                new String[]{"query", "max"},
+                new String[]{"搜索关键词（必填，尽量具体，可用引号精确匹配）", "最多返回条数，默认 8，上限 10"},
+                new String[]{"query"}));
         out.put(fn2("key_pool_update", "更新密钥池中某个服务商的 key/url/models/newName（按 name 或 id 定位）",
                 new String[]{"name", "id", "key", "url", "models", "newName"},
                 new String[]{"服务商名称（与 id 二选一）", "服务商 id（与 name 二选一）", "新 API 密钥（可选）", "新接口地址（可选）", "新模型列表（逗号分隔，可选）", "新名称（可选）"},
@@ -233,6 +237,7 @@ public class LocalTools {
             case "tts_speak": case "tts_stop":
             case "list_settings": case "get_setting": case "set_setting":
             case "key_pool_list": case "key_pool_add": case "key_pool_remove": case "key_pool_update":
+            case "web_search":
             case "browser_open": case "browser_status": case "browser_extract":
             case "browser_click": case "browser_type": case "browser_scroll":
             case "browser_back": case "browser_eval": case "browser_screenshot":
@@ -283,6 +288,7 @@ public class LocalTools {
             case "key_pool_add": return keyPoolAdd(args);
             case "key_pool_remove": return keyPoolRemove(args);
             case "key_pool_update": return keyPoolUpdate(args);
+            case "web_search": return webSearch(args);
             case "browser_open": return browserOpen(args);
             case "browser_status": return browserStatus();
             case "browser_extract": return browserExtract(args);
@@ -430,6 +436,126 @@ public class LocalTools {
             }
             return "未找到匹配的服务商（name=" + (name.isEmpty() ? "-" : name) + ", id=" + (id.isEmpty() ? "-" : id) + "）。可用 key_pool_list 查看现有列表";
         } catch (Exception e) { return "[更新失败] " + e.getMessage(); }
+    }
+
+    /** 联网搜索：优先必应（真实 URL、中文友好），回退 DuckDuckGo HTML */
+    private static String webSearch(JSONObject a) throws Exception {
+        String query = a.optString("query", "").trim();
+        if (query.isEmpty()) throw new Exception("query 不能为空（搜索关键词，尽量具体）");
+        int max = Math.min(Math.max(a.optInt("max", 8), 1), 10);
+        java.util.Map<String, String> hdr = new java.util.HashMap<>();
+        hdr.put("User-Agent", "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36");
+        hdr.put("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8");
+        String q = java.net.URLEncoder.encode(query, "UTF-8");
+        // 主源：百度（中文搜索最准，移动端结果可解析）
+        Http.Resp r = Http.get("https://www.baidu.com/s?wd=" + q, hdr, 15000);
+        if (r.code == 200 && r.body != null && r.body.contains("<h3")) {
+            String parsed = parseBaidu(r.body, query, max);
+            if (!parsed.startsWith("未解析到")) return parsed;
+        }
+        // 备源：必应（国际/英文查询）
+        Http.Resp r2 = Http.get("https://www.bing.com/search?q=" + q + "&mkt=zh-CN", hdr, 15000);
+        if (r2.code == 200 && r2.body != null && r2.body.contains("b_algo")) {
+            String parsed = parseBing(r2.body, query, max);
+            if (!parsed.startsWith("未解析到")) return parsed;
+        }
+        String err = r.body == null ? "" : " 百度片段：" + clip(r.body);
+        return "[搜索失败] 百度 HTTP " + r.code + " / 必应 HTTP " + r2.code + err;
+    }
+
+    /** 解析百度搜索 HTML：h3 标题 + 超长 href 链接（m.baidu.com 跳转）+ c-abstract/c-line-clamp 摘要 */
+    private static String parseBaidu(String html, String query, int max) {
+        StringBuilder sb = new StringBuilder("🔍 搜索结果（百度）：「" + query + "」\n");
+        java.util.regex.Pattern h3p = java.util.regex.Pattern.compile("<h3[^>]*>(.*?)</h3>", java.util.regex.Pattern.DOTALL);
+        java.util.regex.Matcher m = h3p.matcher(html);
+        java.util.ArrayList<int[]> spans = new java.util.ArrayList<>();
+        java.util.ArrayList<String> ts = new java.util.ArrayList<>();
+        while (m.find()) {
+            String t = stripHtml(m.group(1));
+            if (t.length() < 3) continue;
+            spans.add(new int[]{m.start(), m.end()});
+            ts.add(t);
+        }
+        int n = 0;
+        for (int i = 0; i < spans.size() && n < max; i++) {
+            String title = ts.get(i);
+            // 链接：从 h3 往回最多 6000 字符，取最后一个 http(s)// href（百度 href 值超长）
+            String pre = html.substring(Math.max(0, spans.get(i)[0] - 6000), spans.get(i)[0]);
+            java.util.regex.Matcher lm = java.util.regex.Pattern.compile(
+                    "href=\"([^\"]{5,})\"", java.util.regex.Pattern.DOTALL).matcher(pre);
+            String link = "";
+            while (lm.find()) {
+                String v = lm.group(1);
+                if (v.startsWith("http://") || v.startsWith("https://") || v.startsWith("//")) link = v;
+            }
+            if (link.startsWith("//")) link = "https:" + link;
+            // 摘要：h3 结束到下一个 h3 之间
+            int end = (i + 1 < spans.size()) ? spans.get(i + 1)[0] : Math.min(spans.get(i)[1] + 2500, html.length());
+            String seg = html.substring(spans.get(i)[1], end);
+            String snip = "";
+            java.util.regex.Matcher am = java.util.regex.Pattern.compile(
+                    "c-abstract[^>]*>(.*?)</div>", java.util.regex.Pattern.DOTALL).matcher(seg);
+            if (am.find()) snip = stripHtml(am.group(1));
+            if (snip.isEmpty()) {
+                java.util.regex.Matcher cm = java.util.regex.Pattern.compile(
+                        "c-line-clamp[^>]*>(.*?)<", java.util.regex.Pattern.DOTALL).matcher(seg);
+                if (cm.find()) snip = stripHtml(cm.group(1));
+            }
+            if (snip.isEmpty()) {
+                String st = stripHtml(seg);
+                snip = st.length() > 160 ? st.substring(0, 160) : st;
+            }
+            // 过滤百度 AI 摘要 JSON 块
+            if (snip.startsWith("{\"") || snip.contains(",\"isSingleLine\"") || snip.contains(",\"isZyC\"")) continue;
+            if (snip.length() > 220) snip = snip.substring(0, 220) + "…";
+            sb.append((n + 1) + ". " + title + "\n   " + link + "\n   " + snip + "\n");
+            n++;
+        }
+        if (n == 0) return "未解析到结果（百度页面结构可能变化）";
+        return sb.toString();
+    }
+
+    private static String parseBing(String html, String query, int max) {
+        StringBuilder sb = new StringBuilder("🔍 搜索结果（必应）：「" + query + "」\n");
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile(
+                "<li class=\"b_algo\"[^>]*>(.*?)</li>", java.util.regex.Pattern.DOTALL).matcher(html);
+        int n = 0;
+        while (m.find() && n < max) {
+            String block = m.group(1);
+            // 链接：块内第一个 https 外链（必应结果 h2 被 <a> 包裹，独立提取最稳）
+            java.util.regex.Matcher lm = java.util.regex.Pattern.compile(
+                    "href=\"(https?://[^\"]+)\"", java.util.regex.Pattern.DOTALL).matcher(block);
+            String link = lm.find() ? lm.group(1) : "";
+            // 标题：h2 标签内文本
+            java.util.regex.Matcher tm = java.util.regex.Pattern.compile(
+                    "<h2[^>]*>(.*?)</h2>", java.util.regex.Pattern.DOTALL).matcher(block);
+            String title = tm.find() ? stripHtml(tm.group(1)) : "";
+            if (title.isEmpty()) continue;
+            // 摘要：p 标签内文本
+            java.util.regex.Matcher pm = java.util.regex.Pattern.compile(
+                    "<p[^>]*>(.*?)</p>", java.util.regex.Pattern.DOTALL).matcher(block);
+            String snip = pm.find() ? stripHtml(pm.group(1)) : "";
+            if (snip.length() > 220) snip = snip.substring(0, 220) + "…";
+            sb.append((n + 1) + ". " + title + "\n   " + link + "\n   " + snip + "\n");
+            n++;
+        }
+        if (n == 0) return "未解析到结果（必应可能改版或限流，稍后重试或换关键词）";
+        return sb.toString();
+    }
+
+
+    /** 去 HTML 标签与常见实体，返回纯文本 */
+    private static String stripHtml(String s) {
+        if (s == null) return "";
+        s = s.replaceAll("(?is)<script[^>]*>.*?</script>", " ")
+             .replaceAll("(?is)<style[^>]*>.*?</style>", " ")
+             .replaceAll("(?is)<[^>]+>", " ")
+             .replace("&nbsp;", " ").replace("&amp;", "&")
+             .replace("&lt;", "<").replace("&gt;", ">")
+             .replace("&quot;", "\"").replace("&#39;", "'")
+             .replace("&#x27;", "'").replace("&#x2F;", "/")
+             .replaceAll("[ \\t\\x0B\\f]+", " ").trim();
+        return s;
     }
 
     private static String listSettings() {
