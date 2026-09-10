@@ -95,6 +95,20 @@ public class LocalTools {
                 new String[]{"key", "value"},
                 new String[]{"设置键名（见描述）", "设置值：布尔用 true/false，数字用数值，字符串直接填写"},
                 new String[]{"key", "value"}));
+        out.put(fn2("key_pool_list", "列出 API 密钥池（各服务商 name/id/url/models，key 已脱敏），供 AI 了解可用服务商",
+                null, null, null));
+        out.put(fn2("key_pool_add", "向密钥池添加一个新服务商密钥。APIKey 遵循只写不读：AI 可写入 key 明文，但读取时永远脱敏",
+                new String[]{"name", "url", "key", "models"},
+                new String[]{"服务商名称（必填，如 魔塔/硅基流动）", "OpenAI 兼容接口地址（必填，如 https://api.example.com/v1）", "API 密钥（必填）", "可用模型列表（逗号分隔，可空）"},
+                new String[]{"name", "url", "key"}));
+        out.put(fn2("key_pool_remove", "从密钥池删除一个服务商（按 name 或 id 定位）",
+                new String[]{"name", "id"},
+                new String[]{"服务商名称（与 id 二选一）", "服务商 id（与 name 二选一，key_pool_list 可查）"},
+                null));
+        out.put(fn2("key_pool_update", "更新密钥池中某个服务商的 key/url/models/newName（按 name 或 id 定位）",
+                new String[]{"name", "id", "key", "url", "models", "newName"},
+                new String[]{"服务商名称（与 id 二选一）", "服务商 id（与 name 二选一）", "新 API 密钥（可选）", "新接口地址（可选）", "新模型列表（逗号分隔，可选）", "新名称（可选）"},
+                null));
         out.put(fn2("browser_open", "在应用内浏览器打开网页并等待加载完成（自动切换到浏览器页），返回标题",
                 new String[]{"url", "waitMs"},
                 new String[]{"网址（自动补全 https://）", "等待加载毫秒数，默认8000"},
@@ -218,6 +232,7 @@ public class LocalTools {
             case "mem_write": case "mem_update": case "mem_delete": case "mem_stats":
             case "tts_speak": case "tts_stop":
             case "list_settings": case "get_setting": case "set_setting":
+            case "key_pool_list": case "key_pool_add": case "key_pool_remove": case "key_pool_update":
             case "browser_open": case "browser_status": case "browser_extract":
             case "browser_click": case "browser_type": case "browser_scroll":
             case "browser_back": case "browser_eval": case "browser_screenshot":
@@ -264,6 +279,10 @@ public class LocalTools {
             case "list_settings": return listSettings();
             case "get_setting": return getSetting(args.getString("key"));
             case "set_setting": return setSetting(args.getString("key"), args.optString("value", ""));
+            case "key_pool_list": return keyPoolList(args);
+            case "key_pool_add": return keyPoolAdd(args);
+            case "key_pool_remove": return keyPoolRemove(args);
+            case "key_pool_update": return keyPoolUpdate(args);
             case "browser_open": return browserOpen(args);
             case "browser_status": return browserStatus();
             case "browser_extract": return browserExtract(args);
@@ -289,6 +308,129 @@ public class LocalTools {
     }
 
     // ─── 设置管理（AI 自行配置入口） ───
+
+    private static org.json.JSONArray keyPoolArray() throws Exception {
+        String s = Prefs.get(App.inst).apiKeyPool();
+        if (s == null || s.trim().isEmpty()) s = "[]";
+        return new org.json.JSONArray(s);
+    }
+
+    private static void keyPoolSave(org.json.JSONArray arr) throws Exception {
+        Prefs.get(App.inst).apiKeyPool(arr.toString());
+    }
+
+    private static String keyPoolList(JSONObject a) {
+        try {
+            JSONArray arr = keyPoolArray();
+            if (arr.length() == 0)
+                return "密钥池为空（0 个服务商）。可用 key_pool_add 添加（name/url/key 必填）。";
+            StringBuilder sb = new StringBuilder("密钥池（共 " + arr.length() + " 个服务商，key 已脱敏）：\n");
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject o = arr.getJSONObject(i);
+                sb.append(i + 1).append(". ").append(o.optString("name", "(未命名)"))
+                        .append(" | id=").append(o.optString("id", ""))
+                        .append(" | key=").append(o.optString("key", "").isEmpty() ? "未设置" : maskKey(o.optString("key", "")))
+                        .append("\n   url=").append(o.optString("url", ""))
+                        .append("\n   models=").append(o.optJSONArray("models") == null ? "" : o.optJSONArray("models").toString())
+                        .append("\n");
+            }
+            return sb.toString();
+        } catch (Exception e) { return "[密钥池读取失败] " + e.getMessage(); }
+    }
+
+    private static String keyPoolAdd(JSONObject a) {
+        try {
+            String name = a.optString("name", "").trim();
+            String url = a.optString("url", "").trim();
+            String key = a.optString("key", "").trim();
+            if (name.isEmpty()) return "错误：name 不能为空（给服务商起个名字，如 魔塔/硅基流动）";
+            if (url.isEmpty()) return "错误：url 不能为空（OpenAI 兼容接口地址）";
+            if (key.isEmpty()) return "错误：key 不能为空（API 密钥）";
+            JSONArray arr = keyPoolArray();
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject o = arr.getJSONObject(i);
+                if (name.equals(o.optString("name", "")))
+                    return "错误：已存在名为「" + name + "」的服务商，如需修改请用 key_pool_update";
+            }
+            JSONObject ne = new JSONObject();
+            ne.put("id", String.valueOf(System.currentTimeMillis()));
+            ne.put("name", name);
+            ne.put("url", url);
+            ne.put("key", key);
+            JSONArray models = new JSONArray();
+            String ms = a.optString("models", "").trim();
+            if (!ms.isEmpty()) for (String m : ms.split("[,，]")) if (!m.trim().isEmpty()) models.put(m.trim());
+            ne.put("models", models);
+            arr.put(ne);
+            int idx = arr.length() - 1;
+            keyPoolSave(arr);
+            Ui.H.post(() -> {
+                MainActivity ma = MainActivity.instance();
+                if (ma != null && ma.chatPage() != null) ma.chatPage().loadModels();
+            });
+            return "已添加密钥「" + name + "」（当前共 " + arr.length() + " 个服务商，index=" + idx + "）。"
+                    + "模型列表已刷新。如需立即启用，可用 set_setting 设置 activeKeyIndex=" + idx
+                    + "（或 activeCloudModel=某个模型名）；也可在设置→模型列表中直接选用。";
+        } catch (Exception e) { return "[添加失败] " + e.getMessage(); }
+    }
+
+    private static String keyPoolRemove(JSONObject a) {
+        try {
+            String name = a.optString("name", "").trim();
+            String id = a.optString("id", "").trim();
+            if (name.isEmpty() && id.isEmpty()) return "错误：请提供 name 或 id 指定要删除的服务商";
+            JSONArray arr = keyPoolArray();
+            for (int i = arr.length() - 1; i >= 0; i--) {
+                JSONObject o = arr.getJSONObject(i);
+                boolean match = (!name.isEmpty() && name.equals(o.optString("name", "")))
+                        || (!id.isEmpty() && id.equals(o.optString("id", "")));
+                if (match) {
+                    String removed = o.optString("name", "(未命名)");
+                    arr.remove(i);
+                    keyPoolSave(arr);
+                    Ui.H.post(() -> {
+                        MainActivity ma = MainActivity.instance();
+                        if (ma != null && ma.chatPage() != null) ma.chatPage().loadModels();
+                    });
+                    return "已删除密钥「" + removed + "」，剩余 " + arr.length() + " 个服务商，模型列表已刷新";
+                }
+            }
+            return "未找到匹配的服务商（name=" + (name.isEmpty() ? "-" : name) + ", id=" + (id.isEmpty() ? "-" : id) + "）。可用 key_pool_list 查看现有列表";
+        } catch (Exception e) { return "[删除失败] " + e.getMessage(); }
+    }
+
+    private static String keyPoolUpdate(JSONObject a) {
+        try {
+            String name = a.optString("name", "").trim();
+            String id = a.optString("id", "").trim();
+            if (name.isEmpty() && id.isEmpty()) return "错误：请提供 name 或 id 指定要修改的服务商";
+            JSONArray arr = keyPoolArray();
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject o = arr.getJSONObject(i);
+                boolean match = (!name.isEmpty() && name.equals(o.optString("name", "")))
+                        || (!id.isEmpty() && id.equals(o.optString("id", "")));
+                if (match) {
+                    String oldName = o.optString("name", "(未命名)");
+                    if (a.has("key")) o.put("key", a.optString("key", "").trim());
+                    if (a.has("url")) o.put("url", a.optString("url", "").trim());
+                    if (a.has("newName")) o.put("name", a.optString("newName", "").trim());
+                    if (a.has("models")) {
+                        JSONArray models = new JSONArray();
+                        String ms = a.optString("models", "").trim();
+                        if (!ms.isEmpty()) for (String m : ms.split("[,，]")) if (!m.trim().isEmpty()) models.put(m.trim());
+                        o.put("models", models);
+                    }
+                    keyPoolSave(arr);
+                    Ui.H.post(() -> {
+                        MainActivity ma = MainActivity.instance();
+                        if (ma != null && ma.chatPage() != null) ma.chatPage().loadModels();
+                    });
+                    return "已更新密钥「" + oldName + "」，模型列表已刷新";
+                }
+            }
+            return "未找到匹配的服务商（name=" + (name.isEmpty() ? "-" : name) + ", id=" + (id.isEmpty() ? "-" : id) + "）。可用 key_pool_list 查看现有列表";
+        } catch (Exception e) { return "[更新失败] " + e.getMessage(); }
+    }
 
     private static String listSettings() {
         Prefs p = Prefs.get(App.inst);
