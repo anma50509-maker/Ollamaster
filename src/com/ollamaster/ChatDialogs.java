@@ -418,6 +418,12 @@ class ChatDialogs {
 
     // ==================== 消息操作 ====================
 
+    /** 提取消息正文：剥离思考链段（thinking 标签），仅保留回答正文 */
+    private String bodyOf(ConvStore.Msg m) {
+        String c = m.content == null ? "" : m.content;
+        return ChatPage.stripThink(c);
+    }
+
     void msgMenu(final ConvStore.Msg m, boolean allowRegen) {
         t = Theme.of(act);
         LinearLayout box = new LinearLayout(act);
@@ -425,14 +431,15 @@ class ChatDialogs {
         box.addView(Ui.title(act, t, "消息操作"));
         box.addView(Ui.gap(act, 8));
         final Dialog[] d = new Dialog[1];
-        addMenuItem(box, "复制全文", "copy", () -> Ui.copy(act, m.content));
+        addMenuItem(box, "复制全文", "copy", () -> Ui.copy(act, bodyOf(m)));
         addMenuItem(box, "选择文本", "edit", () -> showTextSelect(m));
         addMenuItem(box, "朗读此消息", "voice", () -> {
-            if (m.content == null || m.content.trim().isEmpty()) {
+            String speech = ChatPage.stripForSpeech(m.content);
+            if (speech.isEmpty()) {
                 Ui.toast(act, "该消息无内容可朗读");
                 return;
             }
-            TtsEngine.get(act).speak(m.content);
+            TtsEngine.get(act).speak(speech);
             d[0].dismiss();
         });
         addMenuItem(box, "停止朗读", "stop", () -> {
@@ -479,7 +486,7 @@ class ChatDialogs {
         title.setTypeface(Ui.serifBold());
         bar.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         TextView copy = Ui.btnGhost(act, t, "复制全文");
-        copy.setOnClickListener(v -> { Ui.copy(act, m.content); d.dismiss(); });
+        copy.setOnClickListener(v -> { Ui.copy(act, bodyOf(m)); d.dismiss(); });
         bar.addView(copy);
         TextView closeX = new TextView(act);
         closeX.setText("");
@@ -491,7 +498,7 @@ class ChatDialogs {
         root.addView(bar);
 
         TextView tv = new TextView(act);
-        tv.setText(m.content == null ? "" : m.content);
+        tv.setText(bodyOf(m));
         tv.setTextColor(t.textPri);
         tv.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 14.5f));
         tv.setLineSpacing(0, 1.3f);

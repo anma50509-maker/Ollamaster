@@ -872,7 +872,7 @@ public class ChatPage extends Page {
     }
 
     /** 提取用于朗读的纯文本：去掉思考链与 Markdown 符号 */
-    private static String stripForSpeech(String s) {
+    static String stripForSpeech(String s) {
         if (s == null) return "";
         return s.replaceAll("(?s)<think>.*?</think>", " ")
                 .replaceAll("```", " ")
