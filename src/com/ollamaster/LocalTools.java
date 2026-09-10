@@ -91,7 +91,7 @@ public class LocalTools {
                 null, null, null));
         out.put(fn2("get_setting", "读取单个设置项的当前值",
                 new String[]{"key"}, new String[]{"设置键名，如 temperature / ttsMode / autoTts"}, new String[]{"key"}));
-        out.put(fn2("set_setting", "修改应用设置（AI 自行配置入口）。支持键：host,port,timeoutSec,retryMax,editMode,themeName,customTheme,fontScale,stream,showThink,streamDiag,temperature,topP,maxTokens,ctxMsgs,summaryKb,sysPrompt,cloudMode,cloudUrl,cloudKey,cloudModels,activeModel,activeCloudModel,ttsMode,ttsUrl,ttsKey,ttsModel,ttsVoice,ttsSpeed,autoTts,activeKeyIndex,apiKeyPool,workspace,imgEnabled,imgUrl,imgKey,imgModel,imgSize,imgStyle,imgDir,imgVisionModel,visionMode,visionUrl,visionKey,visionModelId,autoTitle",
+        out.put(fn2("set_setting", "修改应用设置（AI 自行配置入口）。支持键：host,port,timeoutSec,retryMax,editMode,themeName,customTheme,cBg,cAccent,cText,fontScale,stream,showThink,streamDiag,temperature,topP,maxTokens,ctxMsgs,summaryKb,sysPrompt,cloudMode,cloudUrl,cloudKey,cloudModels,activeModel,activeCloudModel,ttsMode,ttsUrl,ttsKey,ttsModel,ttsVoice,ttsSpeed,autoTts,activeKeyIndex,apiKeyPool,workspace,imgEnabled,imgUrl,imgKey,imgModel,imgSize,imgStyle,imgDir,imgVisionModel,visionMode,visionUrl,visionKey,visionModelId,autoTitle",
                 new String[]{"key", "value"},
                 new String[]{"设置键名（见描述）", "设置值：布尔用 true/false，数字用数值，字符串直接填写"},
                 new String[]{"key", "value"}));
@@ -300,6 +300,9 @@ public class LocalTools {
         sb.append("editMode = ").append(p.editMode()).append("（工具执行模式）\n");
         sb.append("themeName = ").append(p.themeName()).append("\n");
         sb.append("customTheme = ").append(p.customTheme()).append("\n");
+        sb.append("cBg = ").append(hexOf(p.cBg())).append("（自定义背景色）\n");
+        sb.append("cAccent = ").append(hexOf(p.cAccent())).append("（自定义强调色）\n");
+        sb.append("cText = ").append(hexOf(p.cText())).append("（自定义文字色）\n");
         sb.append("fontScale = ").append(p.fontScale()).append("\n");
         sb.append("stream = ").append(p.stream()).append("（流式输出）\n");
         sb.append("showThink = ").append(p.showThink()).append("（显示思考链）\n");
@@ -324,7 +327,7 @@ public class LocalTools {
         sb.append("ttsSpeed = ").append(p.ttsSpeed()).append("\n");
         sb.append("autoTts = ").append(p.autoTts()).append("（自动朗读 AI 回复）\n");
         sb.append("activeKeyIndex = ").append(p.activeKeyIndex()).append("\n");
-        sb.append("apiKeyPool = ").append(p.apiKeyPool()).append("\n");
+        sb.append("apiKeyPool = ").append(maskApiKeyPool(p.apiKeyPool())).append("\n");
         sb.append("workspace = ").append(p.workspace()).append("\n");
         sb.append("imgEnabled = ").append(p.imgEnabled()).append("（生图 AI 开关）\n");
         sb.append("imgUrl = ").append(p.imgUrl()).append("\n");
@@ -354,6 +357,9 @@ public class LocalTools {
             case "editMode": return "editMode = " + p.editMode();
             case "themeName": return "themeName = " + p.themeName();
             case "customTheme": return "customTheme = " + p.customTheme();
+            case "cBg": return "cBg = " + hexOf(p.cBg());
+            case "cAccent": return "cAccent = " + hexOf(p.cAccent());
+            case "cText": return "cText = " + hexOf(p.cText());
             case "fontScale": return "fontScale = " + p.fontScale();
             case "stream": return "stream = " + p.stream();
             case "showThink": return "showThink = " + p.showThink();
@@ -378,7 +384,7 @@ public class LocalTools {
             case "ttsSpeed": return "ttsSpeed = " + p.ttsSpeed();
             case "autoTts": return "autoTts = " + p.autoTts();
             case "activeKeyIndex": return "activeKeyIndex = " + p.activeKeyIndex();
-            case "apiKeyPool": return "apiKeyPool = " + p.apiKeyPool();
+            case "apiKeyPool": return "apiKeyPool = " + maskApiKeyPool(p.apiKeyPool());
             case "workspace": return "workspace = " + p.workspace();
             case "imgEnabled": return "imgEnabled = " + p.imgEnabled();
             case "imgUrl": return "imgUrl = " + p.imgUrl();
@@ -410,6 +416,9 @@ public class LocalTools {
             case "editMode": p.editMode(parseBool(v, "editMode")); break;
             case "themeName": p.themeName(v); break;
             case "customTheme": p.customTheme(parseBool(v, "customTheme")); break;
+            case "cBg": p.colors(parseColor(v, "cBg"), p.cAccent(), p.cText()); break;
+            case "cAccent": p.colors(p.cBg(), parseColor(v, "cAccent"), p.cText()); break;
+            case "cText": p.colors(p.cBg(), p.cAccent(), parseColor(v, "cText")); break;
             case "fontScale": p.fontScale(parseFloat(v, "fontScale")); break;
             case "stream": p.stream(parseBool(v, "stream")); break;
             case "showThink": p.showThink(parseBool(v, "showThink")); break;
@@ -479,6 +488,45 @@ public class LocalTools {
         if ("true".equals(s) || "1".equals(s) || "yes".equals(s) || "on".equals(s)) return true;
         if ("false".equals(s) || "0".equals(s) || "no".equals(s) || "off".equals(s)) return false;
         throw new Exception(k + " 需要 true/false，收到: " + v);
+    }
+
+    /** int 颜色 → #RRGGBB（供 list_settings / get_setting 可读输出） */
+    private static String hexOf(int c) {
+        return String.format("#%02X%02X%02X", (c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF);
+    }
+
+    /** 解析 #RRGGBB 或 0xRRGGBB 颜色，失败报错 */
+    private static int parseColor(String v, String k) throws Exception {
+        String t = v.trim();
+        if (t.startsWith("#")) t = t.substring(1);
+        else if (t.startsWith("0x") || t.startsWith("0X")) t = t.substring(2);
+        try {
+            int rgb = Integer.parseInt(t, 16);
+            return 0xFF000000 | rgb;
+        } catch (Exception e) {
+            throw new Exception(k + " 需要颜色值（如 #E0DECF），收到: " + v);
+        }
+    }
+
+    /** API key 完全打码：只返回占位符，绝不向 AI 暴露任何 key 字符（防止泄露进云端模型上下文） */
+    private static String maskKey(String k) {
+        return "••••（已隐藏）";
+    }
+
+    /** apiKeyPool 脱敏：只打码各服务商的 key 字段，保留 name/url/models 供 AI 了解可用服务 */
+    private static String maskApiKeyPool(String json) {
+        if (json == null || json.trim().isEmpty() || "[]".equals(json.trim())) return "[]";
+        try {
+            org.json.JSONArray arr = new org.json.JSONArray(json);
+            for (int i = 0; i < arr.length(); i++) {
+                org.json.JSONObject o = arr.getJSONObject(i);
+                String k = o.optString("key", "");
+                if (!k.isEmpty()) o.put("key", maskKey(k));
+            }
+            return arr.toString();
+        } catch (Exception e) {
+            return "[apiKeyPool 格式异常，未展开]";
+        }
     }
     /** 所有会话共享主工作区（已移除按会话 id 隔离的 convs/<会话id> 机制）。 */
     private static File convWorkspace() {

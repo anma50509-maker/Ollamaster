@@ -51,9 +51,9 @@ public class Prefs {
     public boolean customTheme() { return sp.getBoolean("customTheme", false); }
     public void customTheme(boolean v) { sp.edit().putBoolean("customTheme", v).apply(); }
 
-    public int cBg() { return sp.getInt("cBg", 0xFF101216); }
-    public int cAccent() { return sp.getInt("cAccent", 0xFFD4AF6A); }
-    public int cText() { return sp.getInt("cText", 0xFFF2EDE2); }
+    public int cBg() { return sp.getInt("cBg", 0xFFE0DECF); }
+    public int cAccent() { return sp.getInt("cAccent", 0xFF896461); }
+    public int cText() { return sp.getInt("cText", 0xFF090000); }
     public void colors(int bg, int ac, int tx) { sp.edit().putInt("cBg", bg).putInt("cAccent", ac).putInt("cText", tx).apply(); }
 
     public float fontScale() { return sp.getFloat("fontScale", 1.0f); }
