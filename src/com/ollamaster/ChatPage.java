@@ -1083,34 +1083,39 @@ public class ChatPage extends Page {
         out.addAll(hist.subList(from, hist.size()));
         while (out.size() > 1 && "tool".equals(out.get(0).role)) out.remove(0);
 
-        // 两步修复工具调用链一致性：
-        // 第一步：确保每个 assistant+tool_calls 都有完整的 tool 响应，否则剥离 tool_calls
+        // 两步修复工具调用链一致性（精确匹配 tool_call_id，杜绝孤立 tool 消息导致 API 400）：
+        // 第一步：assistant 的 tool_calls 只保留有精确 tool 响应的调用；全部无响应则整条剥离
         for (int i = 0; i < out.size(); i++) {
             ConvStore.Msg m = out.get(i);
             if (!"assistant".equals(m.role) || m.tools == null || m.tools.isEmpty()) continue;
-            java.util.Set<String> needed = new java.util.HashSet<>();
-            for (ConvStore.ToolCall tc : m.tools) needed.add(tc.id);
+            java.util.Set<String> responded = new java.util.HashSet<>();
             for (int j = i + 1; j < out.size(); j++) {
                 ConvStore.Msg n = out.get(j);
-                if ("tool".equals(n.role) && n.toolCallId != null) needed.remove(n.toolCallId);
+                if ("tool".equals(n.role) && n.toolCallId != null) responded.add(n.toolCallId);
                 else if (!"tool".equals(n.role)) break;
             }
-            if (!needed.isEmpty()) { m.tools = null; }
+            java.util.ArrayList<ConvStore.ToolCall> keep = new java.util.ArrayList<>();
+            for (ConvStore.ToolCall tc : m.tools) {
+                if (tc.id != null && responded.contains(tc.id)) keep.add(tc);
+            }
+            if (keep.isEmpty()) m.tools = null;
+            else if (keep.size() != m.tools.size()) m.tools = keep;
         }
-        // 第二步：移除没有对应 assistant+tool_calls 的孤立 tool 消息
-        for (int i = out.size() - 1; i >= 1; i--) {
+        // 第二步：删除 tool_call_id 在前面对应 assistant 的 tool_calls 中找不到精确匹配的孤立 tool 消息
+        for (int i = out.size() - 1; i >= 0; i--) {
             if (!"tool".equals(out.get(i).role)) continue;
-            boolean hasPrecedingAssistant = false;
+            boolean matched = false;
             for (int j = i - 1; j >= 0; j--) {
                 String r = out.get(j).role;
-                if ("assistant".equals(r)) {
-                    ConvStore.Msg am = out.get(j);
-                    hasPrecedingAssistant = am.tools != null && !am.tools.isEmpty();
+                if ("assistant".equals(r) && out.get(j).tools != null) {
+                    for (ConvStore.ToolCall tc : out.get(j).tools) {
+                        if (tc.id != null && tc.id.equals(out.get(i).toolCallId)) { matched = true; break; }
+                    }
                     break;
                 }
                 if ("user".equals(r) || "system".equals(r)) break;
             }
-            if (!hasPrecedingAssistant) out.remove(i);
+            if (!matched) out.remove(i);
         }
 
         return out;
