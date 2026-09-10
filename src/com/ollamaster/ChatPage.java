@@ -79,6 +79,8 @@ public class ChatPage extends Page {
     String model = "";
     private Http.Cancel cancel;
     volatile boolean streaming;
+    /** 流式滚动锁定：最新字块在屏时持续跟随；用户上滑翻看历史则解除，滚回底部自动恢复 */
+    private volatile boolean followBottom = true;
     ConvStore.Msg streamMsg;
     /** 流式气泡注册表：msg 身份 hash → 对应气泡的思考/正文视图（构建气泡时登记，delta 时精准刷新） */
     final android.util.SparseArray<Object> streamViews = new android.util.SparseArray<>();
@@ -167,6 +169,15 @@ public class ChatPage extends Page {
         msgList.setPadding(ph, Ui.dpi(act, 4), ph, Ui.dpi(act, 8));
         msgAdapter = bubbles.adapter();
         msgList.setAdapter(msgAdapter);
+
+        // 流式滚动锁定：最新字块渲染在屏时持续跟随；用户向上滑动（离开底部）则解除锁定
+        msgList.setOnTouchListener((v, ev) -> {
+            if (streaming && ev.getActionMasked() == android.view.MotionEvent.ACTION_UP) {
+                int n = msgAdapter == null ? 0 : msgAdapter.getCount();
+                followBottom = n > 0 && msgList.getLastVisiblePosition() >= n - 1;
+            }
+            return false;
+        });
         fl.addView(msgList, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
@@ -708,6 +719,7 @@ public class ChatPage extends Page {
         msgList.post(() -> {
             int n = msgAdapter == null ? 0 : msgAdapter.getCount();
             if (n == 0 || msgList == null) return;
+            if (streaming && !followBottom) return;
             boolean nearBottom = msgList.getChildCount() == 0
                     || msgList.getLastVisiblePosition() >= n - 2;
             if (nearBottom || !streaming) msgList.setSelection(n - 1);
@@ -1334,6 +1346,7 @@ public class ChatPage extends Page {
     }
 
     private void send(String text) {
+        followBottom = true;  // 用户发新消息 → 重新锁定跟随最新回复
         ensureConv();
         ArrayList<String> atts = new ArrayList<>(pendingAttaches);
         if ("新对话".equals(conv.title)) {
