@@ -1284,7 +1284,8 @@ public class LocalTools {
                 return "生图失败：响应既无 b64_json 也无 url：" + trunc(r.body, 300);
             }
             return "图片已生成并保存：" + outF.getAbsolutePath()
-                    + "\n（可用 read_file 或 web_vision 查看内容，也可继续用其他工具处理）";
+                    + "\n（在回复中展示该图片请用 Markdown 图片语法：![图片描述](" + outF.getAbsolutePath()
+                    + ")，气泡会自动渲染成图片；也可以继续用其他工具处理）";
         } catch (Exception e) {
             return "[生图失败] " + e.getMessage();
         }

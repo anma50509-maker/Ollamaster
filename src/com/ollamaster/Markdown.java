@@ -16,10 +16,13 @@ import android.text.style.RelativeSizeSpan;
 import android.text.style.StrikethroughSpan;
 import android.text.style.StyleSpan;
 import android.view.View;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.view.ViewGroup;
 import android.widget.HorizontalScrollView;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import java.util.ArrayList;
@@ -568,7 +571,7 @@ public class Markdown {
             }
             String[] lines = parts[i].split("\n", -1);
             for (int li = 0; li < lines.length; li++) {
-                String line = lines[li];
+                String line = extractInlineImages(ctx, lines[li], t, r.views);
                 if (P_TABLE_ROW.matcher(line).matches() && li + 1 < lines.length
                         && P_TABLE_SEP.matcher(lines[li + 1]).matches()) {
                     java.util.List<String> rows = new java.util.ArrayList<>();
@@ -587,6 +590,63 @@ public class Markdown {
         }
         r.text = render(ctx, acc.toString(), t);
         return r;
+    }
+
+    /** 提取行内本地图片 ![alt](本地路径)：渲染成 ImageView 加入视图列表，并从行文本移除标记 */
+    private static String extractInlineImages(Context ctx, String line, Theme t, List<View> views) {
+        if (line == null || line.indexOf("![") < 0) return line;
+        Matcher m = P_IMG.matcher(line);
+        StringBuffer sb = new StringBuffer();
+        while (m.find()) {
+            String url = m.group(2);
+            if (isLocalImage(url)) {
+                m.appendReplacement(sb, Matcher.quoteReplacement(""));
+                View v = buildImageView(ctx, url, t);
+                if (v != null) views.add(v);
+            } else {
+                m.appendReplacement(sb, Matcher.quoteReplacement(m.group(0)));
+            }
+        }
+        m.appendTail(sb);
+        return sb.toString();
+    }
+
+    private static boolean isLocalImage(String url) {
+        try {
+            java.io.File f = new java.io.File(url);
+            return f.exists() && f.isFile() && ConvStore.isImage(f.getName());
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** 生成本地图片视图：等比缩放到最大 250dp 宽，圆角浅底色 */
+    private static View buildImageView(Context ctx, String path, Theme t) {
+        try {
+            Bitmap bm = BitmapFactory.decodeFile(path);
+            if (bm == null) return null;
+            int maxW = Ui.dpi(ctx, 250);
+            int w = bm.getWidth(), h = bm.getHeight();
+            if (w > maxW) {
+                int nh = Math.max(1, (int) (h * (maxW * 1.0 / w)));
+                Bitmap scaled = Bitmap.createScaledBitmap(bm, maxW, nh, true);
+                if (scaled != bm) bm.recycle();
+                bm = scaled;
+            }
+            ImageView iv = new ImageView(ctx);
+            iv.setImageBitmap(bm);
+            iv.setAdjustViewBounds(true);
+            iv.setMaxWidth(maxW);
+            int pad = Ui.dpi(ctx, 4);
+            iv.setPadding(pad, pad, pad, pad);
+            iv.setBackground(Ui.round(t.alpha(t.textPri, 0.05f), Ui.dpi(ctx, 10)));
+            android.widget.FrameLayout wrap = new android.widget.FrameLayout(ctx);
+            wrap.addView(iv, new android.widget.FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            return wrap;
+        } catch (Throwable e) {
+            return null;
+        }
     }
 
     /**

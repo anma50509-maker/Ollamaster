@@ -165,7 +165,7 @@ public class ConvStore {
         private static String attachBlock(String p) {
             File f = new File(p);
             String name = f.getName();
-            if (isImage(p)) return "\n\n[图片：" + name + "]";
+            if (isImage(p)) return "\n\n[图片：" + name + "]（已作为视觉输入随消息发送；若当前模型无法直接识别图片内容，请调用 web_vision 工具查看：path=\"" + p + "\")";
             if (isTextName(name)) {
                 String body = cachedText(f);
                 return "\n\n[附件文本文件：" + name + " 内容如下]\n```\n" + body + "\n```";
