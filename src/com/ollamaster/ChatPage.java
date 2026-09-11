@@ -59,6 +59,7 @@ public class ChatPage extends Page {
     /** 待发送附件：已拷入应用私有目录的绝对路径 */
     private final ArrayList<String> pendingAttaches = new ArrayList<>();
     private static final int REQ_PICK_FILE = 77;
+    private static final int REQ_IMPORT_CARD = 5003;
     private TextView toolHint;
     ConvStore.Conv conv;
     List<Personas.P> personas = new ArrayList<>();
@@ -416,6 +417,51 @@ public class ChatPage extends Page {
 
     private static final long MAX_ATTACH_BYTES = 50L * 1024 * 1024;
 
+    /** 打开系统文件选择器，选取酒馆角色卡文件（JSON / PNG）导入人设 */
+    void pickCardFile() {
+        try {
+            Intent in = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            in.addCategory(Intent.CATEGORY_OPENABLE);
+            in.setType("*/*");
+            act.startActivityForResult(in, REQ_IMPORT_CARD);
+        } catch (Exception e) {
+            Ui.toast(act, "无法打开文件选择器：" + e.getMessage());
+        }
+    }
+
+    /** 读取角色卡文件并导入人设（PNG 卡/JSON 均由 Personas.parseCardFile 解析） */
+    private void importCardFile(Uri uri) {
+        try {
+            java.io.InputStream is = act.getContentResolver().openInputStream(uri);
+            if (is == null) { Ui.toast(act, "无法读取文件"); return; }
+            java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = is.read(buf)) > 0) bos.write(buf, 0, n);
+            is.close();
+            int added = importPersonas(Personas.parseCardFile(bos.toByteArray()));
+            Ui.toast(act, added > 0 ? "已导入 " + added + " 张人设卡" : "未识别出人设卡：请选择酒馆角色卡 JSON/PNG");
+        } catch (Exception e) {
+            Ui.toast(act, "读取文件失败：" + e.getMessage());
+        }
+    }
+
+    /** 导入人设列表并保存（同名去重），返回新增数量。粘贴导入与文件导入共用 */
+    int importPersonas(java.util.List<Personas.P> list) {
+        if (list == null || list.isEmpty()) return 0;
+        int added = 0;
+        for (Personas.P p : list) {
+            boolean dup = false;
+            for (Personas.P x : personas) if (!x.plugin && x.name.equals(p.name)) { dup = true; break; }
+            if (!dup) { personas.add(p); added++; }
+        }
+        if (added > 0) {
+            Personas.saveAll(act, personas);
+            updateChips();
+        }
+        return added;
+    }
+
     private void pickFiles() {
         try {
             Intent in = new Intent(Intent.ACTION_OPEN_DOCUMENT);
@@ -432,6 +478,10 @@ public class ChatPage extends Page {
     public void onActivityResult(int req, int res, Intent data) {
         if (req == REQ_AVATAR) {
             if (res == android.app.Activity.RESULT_OK && data != null && data.getData() != null) handleAvatarResult(data.getData());
+            return;
+        }
+        if (req == REQ_IMPORT_CARD) {
+            if (res == android.app.Activity.RESULT_OK && data != null && data.getData() != null) importCardFile(data.getData());
             return;
         }
         if (req != REQ_PICK_FILE || res != android.app.Activity.RESULT_OK || data == null) return;

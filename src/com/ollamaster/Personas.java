@@ -174,6 +174,10 @@ public class Personas {
         ArrayList<P> out = new ArrayList<>();
         String json = raw == null ? "" : raw.trim();
         if (json.isEmpty()) return out;
+        // data URI 前缀剥离（data:application/json;base64,xxx）
+        if (json.startsWith("data:") && json.indexOf(',') > 0) {
+            json = json.substring(json.indexOf(',') + 1).trim();
+        }
         // PNG chara 块：base64 编码的 JSON（以 iVBOR 开头或全 base64 字符且含 eyJ 起始特征）
         try {
             if (json.startsWith("iVBOR") || (json.length() > 60 && json.matches("^[A-Za-z0-9+/=\\s]+$") && json.contains("eyJ"))) {
@@ -226,7 +230,7 @@ public class Personas {
             P p = new P();
             p.id = ConvStore.newId();
             p.name = name;
-            p.emoji = firstNonEmpty(o.optString("emoji"), "\uD83C\uDFAD").trim();
+            p.emoji = o.optString("emoji", "").trim();
             String description = o.optString("description", "");
             String creatorNotes = o.optString("creator_notes", "");
             p.desc = firstNonEmpty(creatorNotes, description);
@@ -295,5 +299,56 @@ public class Personas {
         } catch (Exception e) {
             return "{}";
         }
+    }
+
+    // ==================== 角色卡文件导入（酒馆 PNG / JSON） ====================
+
+    /** 从角色卡文件字节导入：PNG 卡解析 tEXt 块 chara 键，其余按 UTF-8/JSON 文本处理 */
+    public static List<P> parseCardFile(byte[] bytes) {
+        ArrayList<P> out = new ArrayList<>();
+        if (bytes == null || bytes.length == 0) return out;
+        if (isPng(bytes)) {
+            String text = pngCharaText(bytes);
+            return text == null ? out : parseSillyTavern(text);
+        }
+        try {
+            String s = new String(bytes, "UTF-8").trim();
+            if (s.indexOf('\uFFFD') >= 0) s = new String(bytes, "ISO-8859-1").trim();
+            return parseSillyTavern(s);
+        } catch (Exception e) {
+            return out;
+        }
+    }
+
+    private static boolean isPng(byte[] b) {
+        return b.length > 8 && (b[0] & 0xFF) == 0x89 && b[1] == 'P' && b[2] == 'N' && b[3] == 'G';
+    }
+
+    /** 从 PNG 字节流提取 tEXt 块的 chara 键文本（酒馆角色卡元数据存放处） */
+    private static String pngCharaText(byte[] b) {
+        try {
+            int p = 8; // 跳过 PNG 签名 89 50 4E 47 0D 0A 1A 0A
+            while (p + 8 <= b.length) {
+                int len = ((b[p] & 0xFF) << 24) | ((b[p + 1] & 0xFF) << 16) | ((b[p + 2] & 0xFF) << 8) | (b[p + 3] & 0xFF);
+                String type = new String(b, p + 4, 4, "US-ASCII");
+                int dataStart = p + 8;
+                if (dataStart + len > b.length) break;
+                if ("tEXt".equals(type)) {
+                    int z = dataStart;
+                    while (z < dataStart + len && b[z] != 0) z++;
+                    if (z > dataStart) {
+                        String kw = new String(b, dataStart, z - dataStart, "ISO-8859-1");
+                        if ("chara".equalsIgnoreCase(kw) && z + 1 < dataStart + len) {
+                            byte[] content = java.util.Arrays.copyOfRange(b, z + 1, dataStart + len);
+                            String s = new String(content, "UTF-8");
+                            if (s.indexOf('\uFFFD') >= 0) s = new String(content, "ISO-8859-1");
+                            return s;
+                        }
+                    }
+                }
+                p = dataStart + len + 4; // 跳过数据区与 CRC
+            }
+        } catch (Exception ignored) {}
+        return null;
     }
 }

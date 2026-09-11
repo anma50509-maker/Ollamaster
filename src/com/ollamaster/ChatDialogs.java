@@ -271,7 +271,8 @@ class ChatDialogs {
         });
         box.addView(lv, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dpi(act, 330)));
         box.addView(Ui.gap(act, 6));
-        TextView importST = Ui.btnGhost(act, t, "\uD83D\uDCE5 导入酒馆人设卡");
+        TextView importST = Ui.btnGhost(act, t, "导入酒馆人设卡");
+        Icon.pinLeft(importST, "file", 14);
         importST.setOnClickListener(v -> importSillyTavernDialog());
         box.addView(importST);
         md = Ui.sheet(act, box, t);
@@ -289,22 +290,31 @@ class ChatDialogs {
         box.setOrientation(LinearLayout.VERTICAL);
         box.addView(Ui.title(act, t, "导入酒馆人设卡"));
         box.addView(Ui.gap(act, 4));
-        box.addView(Ui.caption(act, t, "支持 SillyTavern Character Card V2：粘贴 JSON 或 PNG 卡内嵌 chara 文本（base64），也兼容本应用人格数组"));
+        box.addView(Ui.caption(act, t, "支持 SillyTavern Character Card V2：粘贴 JSON / PNG 内嵌文本，或直接选择卡片文件"));
         box.addView(Ui.gap(act, 8));
         final EditText et = Ui.input(act, t, "粘贴人设卡 JSON…", true);
         et.setMinLines(6);
         box.addView(et);
         box.addView(Ui.gap(act, 8));
+        final Dialog[] w = new Dialog[1];
         TextView demoBtn = Ui.btnGhost(act, t, "填入示例");
+        Icon.pinLeft(demoBtn, "edit", 13);
         final String demo = "{\"spec\":\"chara_card_v2\",\"spec_version\":\"2.0\",\"data\":{\"name\":\"示例角色\",\"description\":\"一个用于测试导入的示例角色\",\"personality\":\"友善、幽默\",\"system_prompt\":\"你是示例角色。\",\"first_mes\":\"你好呀，我是{{char}}！\"}}";
         demoBtn.setOnClickListener(v -> et.setText(demo));
         box.addView(demoBtn);
+        box.addView(Ui.gap(act, 6));
+        TextView fileBtn = Ui.btnGhost(act, t, "选择卡片文件 (.json/.png)");
+        Icon.pinLeft(fileBtn, "folder", 13);
+        fileBtn.setOnClickListener(v -> {
+            w[0].dismiss();
+            cp.pickCardFile();
+        });
+        box.addView(fileBtn);
         box.addView(Ui.gap(act, 10));
         LinearLayout btns = new LinearLayout(act);
         btns.setOrientation(LinearLayout.HORIZONTAL);
         TextView cancel = Ui.btnGhost(act, t, "取消");
         TextView go = Ui.btnPrimary(act, t, "导入");
-        Dialog[] w = new Dialog[1];
         cancel.setOnClickListener(v -> w[0].dismiss());
         go.setOnClickListener(v -> {
             String raw = et.getText().toString().trim();
@@ -314,14 +324,7 @@ class ChatDialogs {
                 Ui.toast(act, "解析失败：不是有效的人设卡 JSON");
                 return;
             }
-            int added = 0;
-            for (Personas.P p : list) {
-                boolean dup = false;
-                for (Personas.P x : cp.personas) if (!x.plugin && x.name.equals(p.name)) { dup = true; break; }
-                if (!dup) { cp.personas.add(p); added++; }
-            }
-            Personas.saveAll(act, cp.personas);
-            cp.updateChips();
+            int added = cp.importPersonas(list);
             w[0].dismiss();
             Ui.toast(act, added > 0 ? "已导入 " + added + " 张人设卡" : "存在同名卡，未重复导入");
             if (md != null && md.isShowing()) {
