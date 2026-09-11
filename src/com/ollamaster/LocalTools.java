@@ -65,6 +65,16 @@ public class LocalTools {
                     new String[]{"id"}, new String[]{"插件 id"}, new String[]{"id"}));
             out.put(fn2("disable_plugin", "禁用一个插件，暂停其所有功能但保留安装",
                     new String[]{"id"}, new String[]{"插件 id"}, new String[]{"id"}));
+            out.put(fn2("create_persona", "创建或更新一张人设卡。AI 直接写入人设库，用户在人设栏立即可见、可编辑可删除；name 已存在则覆盖更新。emoji 参数禁止传 emoji 符号，留空即可（界面用矢量头像兜底）",
+                    new String[]{"name", "emoji", "desc", "prompt"},
+                    new String[]{"人设卡名称（必填，同名覆盖）", "图标（留空；禁止 emoji）", "一句话简介", "系统提示词（人设核心，塑造性格与专长）"},
+                    new String[]{"name"}));
+            out.put(fn2("list_personas", "列出所有人设卡（含来源标记：内置/自建/来自插件·只读）",
+                    null, null, null));
+            out.put(fn2("delete_persona", "删除一张自建或内置人设卡（插件提供的只读卡不可删除）",
+                    new String[]{"name", "id"},
+                    new String[]{"人设卡名称（与 id 二选一）", "人设卡 id（与 name 二选一）"},
+                    null));
         out.put(fn2("mem_list", "列出记忆库条目目录（按 id/标题/分类/更新时间），可用分类过滤",
                 new String[]{"category"}, new String[]{"分类路径（如 工作/后端），空则列出全部"}, null));
         out.put(fn2("mem_read", "读取一条记忆的完整内容（按 id）",
@@ -232,6 +242,7 @@ public class LocalTools {
             case "create_mcp": case "delete_mcp": case "task_complete":
             case "install_plugin": case "uninstall_plugin":
             case "list_plugins": case "enable_plugin": case "disable_plugin":
+            case "create_persona": case "list_personas": case "delete_persona":
             case "mem_list": case "mem_read": case "mem_search":
             case "mem_write": case "mem_update": case "mem_delete": case "mem_stats":
             case "tts_speak": case "tts_stop":
@@ -272,6 +283,9 @@ public class LocalTools {
             case "list_plugins": return listPlugins();
             case "enable_plugin": return enablePlugin(args);
             case "disable_plugin": return disablePlugin(args);
+            case "create_persona": return createPersona(args);
+            case "list_personas": return listPersonas();
+            case "delete_persona": return deletePersona(args);
             case "mem_list": return MemoryStore.listText(args.optString("category", ""));
             case "mem_read": return MemoryStore.readText(args.getString("id"));
             case "mem_search": return MemoryStore.searchText(args.getString("query"));
@@ -1091,6 +1105,92 @@ public class LocalTools {
     }
 
     // ─── 插件管理工具 ───
+
+    /** 创建/更新一张人设卡（AI 直接写入人设库，用户人设栏立即可见可管理） */
+    private static String createPersona(JSONObject args) throws Exception {
+        String name = args.optString("name", "").trim();
+        if (name.isEmpty()) throw new Exception("name 不能为空");
+        String emoji = args.optString("emoji", "").trim();
+        // 防 emoji：多码点（如表情符号）一律清空，界面用矢量头像兜底
+        if (!emoji.isEmpty() && emoji.codePointCount(0, emoji.length()) > 1) emoji = "";
+        String desc = args.optString("desc", "").trim();
+        String prompt = args.optString("prompt", "").trim();
+        java.util.List<Personas.P> list = Personas.list(App.inst);
+        boolean updated = false;
+        for (Personas.P p : list) {
+            if (!p.plugin && p.name.equals(name)) {
+                p.emoji = emoji; p.desc = desc; p.prompt = prompt;
+                updated = true;
+                break;
+            }
+        }
+        String id;
+        if (!updated) {
+            Personas.P p = Personas.blank();
+            p.name = name; p.emoji = emoji; p.desc = desc; p.prompt = prompt;
+            list.add(p);
+            id = p.id;
+        } else {
+            id = "";
+            for (Personas.P p : list) if (!p.plugin && p.name.equals(name)) { id = p.id; break; }
+        }
+        Personas.saveAll(App.inst, list);
+        refreshChatPersonas();
+        return updated
+                ? "已更新人设卡「" + name + "」（id=" + id + "）。用户人设栏立即可见。"
+                : "已创建人设卡「" + name + "」（id=" + id + "）。用户人设栏立即可见，可编辑/删除。";
+    }
+
+    /** 列出所有人设卡（含来源标记），供 AI 管理 */
+    private static String listPersonas() {
+        java.util.List<Personas.P> list = Personas.listAll(App.inst);
+        if (list.isEmpty()) return "(暂无任何人设卡)";
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < list.size(); i++) {
+            Personas.P p = list.get(i);
+            sb.append(i + 1).append(". ").append(p.name);
+            if (p.plugin) sb.append(" [来自插件 ").append(p.sourceId).append(" · 只读]");
+            else if (p.builtin) sb.append(" [内置]");
+            else sb.append(" [自建]");
+            if (p.desc != null && !p.desc.isEmpty()) sb.append(" — ").append(p.desc);
+            if (p.firstMes != null && !p.firstMes.isEmpty()) sb.append("（含开场白）");
+            sb.append("\n");
+        }
+        return sb.toString().trim();
+    }
+
+    /** 删除一张自建/内置人设卡（插件人设只读，不可由本工具删除） */
+    private static String deletePersona(JSONObject args) throws Exception {
+        String name = args.optString("name", "").trim();
+        String id = args.optString("id", "").trim();
+        if (name.isEmpty() && id.isEmpty()) throw new Exception("请传入 name 或 id");
+        java.util.List<Personas.P> list = Personas.list(App.inst);
+        java.util.Iterator<Personas.P> it = list.iterator();
+        String removedName = null;
+        while (it.hasNext()) {
+            Personas.P p = it.next();
+            if (p.plugin) continue;
+            if ((!id.isEmpty() && id.equals(p.id)) || (!name.isEmpty() && name.equals(p.name))) {
+                removedName = p.name;
+                it.remove();
+                break;
+            }
+        }
+        if (removedName == null) throw new Exception("未找到人设卡「" + (name.isEmpty() ? id : name) + "」，或它是插件提供的只读卡");
+        Personas.saveAll(App.inst, list);
+        refreshChatPersonas();
+        return "已删除人设卡「" + removedName + "」";
+    }
+
+    /** 通知聊天页重新加载人设列表（AI 增删人设后界面立即可见） */
+    private static void refreshChatPersonas() {
+        Ui.H.post(() -> {
+            MainActivity ma = MainActivity.instance();
+            if (ma == null) return;
+            ChatPage cp = ma.chatPage();
+            if (cp != null) cp.reloadPersonas();
+        });
+    }
 
     private static String installPlugin(JSONObject args) throws Exception {
         String json = args.getString("json").trim();

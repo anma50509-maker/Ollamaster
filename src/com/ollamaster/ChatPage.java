@@ -2019,6 +2019,13 @@ public class ChatPage extends Page {
         refreshEmpty();
     }
 
+    /** 供 AI 工具（create_persona/delete_persona 等）操作人设库后刷新界面 */
+    public void reloadPersonas() {
+        personas = findPersonaList();
+        updateChips();
+        refreshEmptyChipsSafe();
+    }
+
     @Override
     public void onHostChanged() {
         loadModels();
