@@ -177,7 +177,9 @@ class ChatDialogs {
                 name.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 14));
                 name.setTypeface(android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL));
                 TextView desc = (TextView) midCol.getChildAt(1);
-                desc.setText(p.desc.isEmpty() ? p.prompt : p.desc);
+                String dtext = p.desc.isEmpty() ? p.prompt : p.desc;
+                if (p.plugin) dtext = (dtext.isEmpty() ? "插件提供" : dtext) + " · 来自插件";
+                desc.setText(dtext);
                 desc.setTextColor(t.textSec);
                 desc.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 11));
                 desc.setMaxLines(1);
@@ -193,6 +195,10 @@ class ChatDialogs {
                     pd.dismiss();
                 });
                 row.setOnLongClickListener(v -> {
+                    if (p.plugin) {
+                        Ui.toast(act, pluginTip(p));
+                        return true;
+                    }
                     editPersona(p);
                     return true;
                 });
@@ -244,24 +250,99 @@ class ChatDialogs {
                 edit.setTextColor(t.accent);
                 edit.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 12));
                 edit.setPadding(0, 0, Ui.dpi(act, 14), 0);
-                edit.setOnClickListener(v -> editPersona(p));
+                edit.setOnClickListener(v -> {
+                    if (p.plugin) { Ui.toast(act, pluginTip(p)); return; }
+                    editPersona(p);
+                });
                 TextView del = (TextView) row.getChildAt(2);
                 del.setText("删除");
                 del.setTextColor(t.alpha(t.danger, 0.9f));
                 del.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 12));
                 del.setOnClickListener(v -> {
+                    if (p.plugin) { Ui.toast(act, pluginTip(p)); return; }
                     confirmDeletePersona(p);
                 });
-                row.setOnClickListener(v -> editPersona(p));
+                row.setOnClickListener(v -> {
+                    if (p.plugin) { Ui.toast(act, pluginTip(p)); return; }
+                    editPersona(p);
+                });
                 return row;
             }
         });
         box.addView(lv, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dpi(act, 330)));
+        box.addView(Ui.gap(act, 6));
+        TextView importST = Ui.btnGhost(act, t, "\uD83D\uDCE5 导入酒馆人设卡");
+        importST.setOnClickListener(v -> importSillyTavernDialog());
+        box.addView(importST);
         md = Ui.sheet(act, box, t);
         md.show();
     }
 
+    private String pluginTip(Personas.P p) {
+        return "「" + p.name + "」由插件「" + p.sourceId + "」提供：可在插件管理中禁用该插件后隐藏";
+    }
+
+    /** 导入酒馆（SillyTavern）Character Card V2 人设卡 */
+    void importSillyTavernDialog() {
+        t = Theme.of(act);
+        LinearLayout box = new LinearLayout(act);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.addView(Ui.title(act, t, "导入酒馆人设卡"));
+        box.addView(Ui.gap(act, 4));
+        box.addView(Ui.caption(act, t, "支持 SillyTavern Character Card V2：粘贴 JSON 或 PNG 卡内嵌 chara 文本（base64），也兼容本应用人格数组"));
+        box.addView(Ui.gap(act, 8));
+        final EditText et = Ui.input(act, t, "粘贴人设卡 JSON…", true);
+        et.setMinLines(6);
+        box.addView(et);
+        box.addView(Ui.gap(act, 8));
+        TextView demoBtn = Ui.btnGhost(act, t, "填入示例");
+        final String demo = "{\"spec\":\"chara_card_v2\",\"spec_version\":\"2.0\",\"data\":{\"name\":\"示例角色\",\"description\":\"一个用于测试导入的示例角色\",\"personality\":\"友善、幽默\",\"system_prompt\":\"你是示例角色。\",\"first_mes\":\"你好呀，我是{{char}}！\"}}";
+        demoBtn.setOnClickListener(v -> et.setText(demo));
+        box.addView(demoBtn);
+        box.addView(Ui.gap(act, 10));
+        LinearLayout btns = new LinearLayout(act);
+        btns.setOrientation(LinearLayout.HORIZONTAL);
+        TextView cancel = Ui.btnGhost(act, t, "取消");
+        TextView go = Ui.btnPrimary(act, t, "导入");
+        Dialog[] w = new Dialog[1];
+        cancel.setOnClickListener(v -> w[0].dismiss());
+        go.setOnClickListener(v -> {
+            String raw = et.getText().toString().trim();
+            if (raw.isEmpty()) return;
+            java.util.List<Personas.P> list = Personas.parseSillyTavern(raw);
+            if (list.isEmpty()) {
+                Ui.toast(act, "解析失败：不是有效的人设卡 JSON");
+                return;
+            }
+            int added = 0;
+            for (Personas.P p : list) {
+                boolean dup = false;
+                for (Personas.P x : cp.personas) if (!x.plugin && x.name.equals(p.name)) { dup = true; break; }
+                if (!dup) { cp.personas.add(p); added++; }
+            }
+            Personas.saveAll(act, cp.personas);
+            cp.updateChips();
+            w[0].dismiss();
+            Ui.toast(act, added > 0 ? "已导入 " + added + " 张人设卡" : "存在同名卡，未重复导入");
+            if (md != null && md.isShowing()) {
+                md.dismiss();
+                Ui.H.postDelayed(this::managePersonas, 80);
+            }
+        });
+        LinearLayout.LayoutParams l1 = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        l1.rightMargin = Ui.dpi(act, 8);
+        btns.addView(cancel, l1);
+        btns.addView(go, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        box.addView(btns);
+        w[0] = Ui.center(act, box, t);
+        w[0].show();
+    }
+
     private void confirmDeletePersona(Personas.P p) {
+        if (p.plugin) {
+            Ui.toast(act, pluginTip(p));
+            return;
+        }
         t = Theme.of(act);
         LinearLayout box = new LinearLayout(act);
         box.setOrientation(LinearLayout.VERTICAL);
@@ -299,6 +380,10 @@ class ChatDialogs {
     }
 
     void editPersona(final Personas.P p) {
+        if (p.plugin) {
+            Ui.toast(act, pluginTip(p));
+            return;
+        }
         t = Theme.of(act);
         LinearLayout box = new LinearLayout(act);
         box.setOrientation(LinearLayout.VERTICAL);

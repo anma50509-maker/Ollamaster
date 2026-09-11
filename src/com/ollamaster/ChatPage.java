@@ -643,7 +643,8 @@ public class ChatPage extends Page {
     }
 
     private List<Personas.P> findPersonaList() {
-        return Personas.list(act);
+        // 内置/自建 + 插件人设（插件人设实时合并、只读）
+        return Personas.listAll(act);
     }
 
     public void seedFromEditor(String s) {
@@ -1348,6 +1349,14 @@ public class ChatPage extends Page {
     private void send(String text) {
         followBottom = true;  // 用户发新消息 → 重新锁定跟随最新回复
         ensureConv();
+        // 酒馆人设卡兼容：全新会话选中了含开场白（first_mes）的人设 → 角色先开口
+        if (persona != null && persona.firstMes != null && !persona.firstMes.trim().isEmpty()
+                && conv.msgs.isEmpty()) {
+            conv.msgs.add(new ConvStore.Msg("assistant",
+                    Personas.stReplace(persona.firstMes.trim(), persona.name)));
+            ConvStore.save(act, conv);
+            refreshEmpty();
+        }
         ArrayList<String> atts = new ArrayList<>(pendingAttaches);
         if ("新对话".equals(conv.title)) {
             // 首句占位标题（历史列表立即可见），AI 回复完成后自动生成正式标题

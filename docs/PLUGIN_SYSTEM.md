@@ -221,7 +221,7 @@ Ollamaster 的插件系统允许 AI **自定义整个应用的所有功能和 UI
 5. `rebuildNav()` 重建底部导航栏
 6. 新工具立即可被 AI 调用（下一轮对话的 `toolSpecsIfAny()` 会包含）
 7. 新技能立即注入系统提示（下一轮对话的 `composeSystem()` 会包含）
-8. 新人设卡立即可选（`Plugins.allPersonas()` 会包含）
+8. 新人设卡立即可选（`Personas.listAll()` 实时合并：内置/自建 personas.json + 插件人设，插件人设带「来自插件」标识、只读）
 
 ## 示例插件
 
@@ -238,3 +238,35 @@ Ollamaster 的插件系统允许 AI **自定义整个应用的所有功能和 UI
 - 插件 id 仅允许字母、数字、下划线、连字符
 - 工具输出截断到 12000 字符，防止上下文溢出
 - HTTP 响应默认截断到 8000 字符
+
+## 人设卡与酒馆（SillyTavern）兼容
+
+### 插件人设卡的可见路径
+
+插件 `personas[]` 定义的人设卡在安装并启用插件后，会自动合并进 **人设卡选择弹窗**（聊天页顶部「人设」chip）与 **管理人格设定卡** 列表，显示「来自插件」标识。
+
+- 插件人设卡**只读**：不可编辑、不可删除（提示在插件管理中禁用）
+- 禁用/卸载插件后，其提供的人设卡自动隐藏
+- 插件人设的 id 为 `plugin:<插件id>:<人设名hash>`，选择后持久化到会话，卸载插件再装回仍可恢复
+
+### 酒馆 Character Card V2 导入
+
+聊天页 → 人设卡 → 管理人设 → **📥 导入酒馆人设卡**，支持粘贴以下格式：
+
+- **CCv2 JSON**：`{"spec":"chara_card_v2","spec_version":"2.0","data":{...}}`
+- **简单卡 JSON**：`{"name":"...","description":"..."}`
+- **PNG 卡内嵌 chara 文本**：酒馆导出的 PNG 中 base64 编码的 JSON 块（原样粘贴即可识别）
+- 本应用内部格式：人设数组 / `{"personas":[...]}`
+
+字段映射：
+
+| 酒馆字段 | 本项目字段 |
+|----------|-----------|
+| `name` | 人设名 |
+| `creator_notes` / `description` | 简介（截断 60 字） |
+| `system_prompt` + `personality` + `description` + `scenario` + `post_history_instructions` | 系统提示词（按序合并） |
+| `first_mes` | 开场白：新建会话选中该人设后，角色先开口（支持 `{{char}}`/`{{user}}`/`{{newline}}` 模板变量替换） |
+
+### 导出到酒馆
+
+`Personas.toSillyTavern()` 可将任意本项目人设卡导出为 CCv2 JSON，供复制到 SillyTavern 使用。
