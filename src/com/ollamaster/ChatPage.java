@@ -329,7 +329,9 @@ public class ChatPage extends Page {
 
     private void refreshEmptyChips(LinearLayout row) {
         row.removeAllViews();
-        for (final Personas.P p : personas.subList(0, Math.min(5, personas.size()))) {
+        int n = Math.min(5, personas.size());
+        for (int i = 0; i < n; i++) {
+            final Personas.P p = personas.get(i);
             TextView c = Ui.chip(act, t, p.emoji + "  " + p.name, false);
             c.setOnClickListener(v -> {
                 persona = p;
@@ -341,6 +343,18 @@ public class ChatPage extends Page {
             lp.bottomMargin = Ui.dpi(act, 8);
             row.addView(c, lp);
         }
+        // 入口：完整人设列表（新建/导入的人设卡都在里面）
+        TextView all = Ui.chip(act, t, "全部人设", false);
+        all.setOnClickListener(v -> dialogs.personaSheet());
+        LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        alp.bottomMargin = Ui.dpi(act, 8);
+        row.addView(all, alp);
+    }
+
+    /** 空状态快捷人设区刷新：仅当该区域可见时执行（新建/导入/删除人设后调用，避免新卡不显示） */
+    void refreshEmptyChipsSafe() {
+        if (emptyChipsRow != null) refreshEmptyChips(emptyChipsRow);
     }
 
     private LinearLayout buildComposer() {
@@ -458,6 +472,7 @@ public class ChatPage extends Page {
         if (added > 0) {
             Personas.saveAll(act, personas);
             updateChips();
+            refreshEmptyChipsSafe();
         }
         return added;
     }

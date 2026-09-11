@@ -131,7 +131,7 @@ class ChatDialogs {
         LinearLayout box = new LinearLayout(act);
         box.setOrientation(LinearLayout.VERTICAL);
         box.addView(Ui.title(act, t, "人设卡"));
-        box.addView(Ui.caption(act, t, "为人设注入系统提示词，塑造 AI 的性格与专长"));
+        box.addView(Ui.caption(act, t, "共 " + cp.personas.size() + " 张 · 点击选择，长按编辑"));
         box.addView(Ui.gap(act, 8));
 
         ListView lv = new ListView(act);
@@ -366,6 +366,7 @@ class ChatDialogs {
             Personas.saveAll(act, cp.personas);
             if (cp.persona != null && cp.persona.id.equals(p.id)) cp.persona = null;
             cp.updateChips();
+            cp.refreshEmptyChipsSafe();
             w[0].dismiss();
             Ui.toast(act, "已删除");
             if (md != null && md.isShowing()) {
@@ -453,6 +454,7 @@ class ChatDialogs {
             Personas.saveAll(act, cp.personas);
             if (cp.persona != null && cp.persona.id.equals(p.id)) cp.persona = p;
             cp.updateChips();
+            cp.refreshEmptyChipsSafe();
             w[0].dismiss();
             Ui.toast(act, "已保存");
         });
