@@ -161,9 +161,9 @@ public class WorkPage extends Page {
 
         LinearLayout acts = new LinearLayout(act);
         acts.setOrientation(LinearLayout.HORIZONTAL);
-        String[] labels = {"新建文件", "新建目录", "主工作区", "刷新", "工作区"};
+        String[] labels = {"新文件", "新目录", "主目录", "刷新"};
         Runnable[] runs = {this::newFileDialog, this::newDirDialog, this::gotoMainWorkspace,
-                () -> { ensurePerms(); refreshFiles(); }, this::workspaceDialog};
+                () -> { ensurePerms(); refreshFiles(); }};
         for (int i = 0; i < labels.length; i++) {
             TextView b = Ui.btnGhost(act, t, labels[i]);
             b.setGravity(Gravity.CENTER);
@@ -376,6 +376,7 @@ public class WorkPage extends Page {
                 Ui.toast(act, "失败：" + e.getMessage());
             }
         });
+        w[0].show();
     }
 
     private Dialog simpleConfirm(LinearLayout box, EditText et, String okLabel, Runnable ok) {
