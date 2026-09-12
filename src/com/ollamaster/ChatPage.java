@@ -1592,7 +1592,7 @@ public class ChatPage extends Page {
                             parseCloudTools(placeholder, toolsJson);
                         }
                         @Override public void finishReason(String r) { truncated = "length".equals(r); }
-                        @Override public void usage(long pt, long ct, long hit, long miss) { placeholder.promptTokens = pt; placeholder.cacheHitTokens = hit; }
+                        @Override public void usage(long pt, long ct, long hit, long miss) { placeholder.promptTokens = pt; placeholder.cacheHitTokens = hit; placeholder.cacheMissTokens = miss; }
                         @Override public void error(Exception e) { fail(e, acc); }
                         @Override public void done() { reportDiag(diag, t0); finishTurn(placeholder, acc, meta); }
                     };
@@ -1860,9 +1860,13 @@ public class ChatPage extends Page {
                 if (m.promptTokens > 0) sb2.append("输入 ").append(m.promptTokens);
                 if (m.evalTokens > 0) sb2.append("  ·  输出 ").append(m.evalTokens);
                 if (m.tps > 0) sb2.append("  ·  ").append(String.format(java.util.Locale.US, "%.1f tok/s", m.tps));
-                if (m.cacheHitTokens > 0 && m.promptTokens > 0) {
-                    int rate = (int)(m.cacheHitTokens * 100 / m.promptTokens);
+                if (m.cacheHitTokens > 0) {
+                    long tt = m.cacheHitTokens + m.cacheMissTokens;
+                    if (tt <= 0) tt = m.promptTokens;
+                    int rate = (int)(m.cacheHitTokens * 100 / tt);
                     sb2.append("  ·  缓存命中 ").append(rate).append("%");
+                } else if (m.cacheMissTokens > 0) {
+                    sb2.append("  ·  缓存命中 0%");
                 }
                 if (sb2.length() > 0) {
                     TextView r2 = new TextView(act);

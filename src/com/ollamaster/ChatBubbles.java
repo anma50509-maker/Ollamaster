@@ -262,9 +262,15 @@ class ChatBubbles {
         mt.append(" · ").append(m.model != null && !m.model.isEmpty() ? m.model : cp.modelShort());
         if (m.promptTokens > 0) {
             mt.append(" · 输入 ").append(m.promptTokens);
-            if (m.cacheHitTokens > 0 && m.promptTokens > 0) {
-                int rate = (int)(m.cacheHitTokens * 100 / m.promptTokens);
+            long hit = m.cacheHitTokens;
+            long miss = m.cacheMissTokens;
+            if (hit > 0) {
+                long total = hit + miss;
+                if (total <= 0) total = m.promptTokens;
+                int rate = (int)(hit * 100 / total);
                 mt.append(" · 缓存").append(rate).append("%");
+            } else if (miss > 0) {
+                mt.append(" · 缓存0%");
             }
         }
         meta.setText(mt);

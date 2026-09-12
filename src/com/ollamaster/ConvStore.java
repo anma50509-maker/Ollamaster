@@ -29,6 +29,7 @@ public class ConvStore {
         public String reasoning = "";  // 思考链内容（独立存储）
         public long promptTokens;     // 输入 token 数（prompt_eval_count / prompt_tokens）
         public long cacheHitTokens;   // 缓存命中 token 数（云端 prompt_cache_hit_tokens）
+        public long cacheMissTokens;  // 缓存未命中 token 数（prompt_cache_miss_tokens）
         public String model;            // 该轮对话使用的模型名
 
         public Msg(String role, String content) { this.role = role; this.content = content; this.ts = System.currentTimeMillis(); }
