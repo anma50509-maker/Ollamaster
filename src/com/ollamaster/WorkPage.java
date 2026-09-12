@@ -168,6 +168,8 @@ public class WorkPage extends Page {
             TextView b = Ui.btnGhost(act, t, labels[i]);
             b.setGravity(Gravity.CENTER);
             b.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 12));
+            int bp = Ui.dpi(act, 4);
+            b.setPadding(bp, Ui.dpi(act, 4), bp, Ui.dpi(act, 4));
             b.setOnClickListener(v -> runs[acts.indexOfChild(b)].run());
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, Ui.dpi(act, 34), 1f);
             if (i < labels.length - 1) lp.rightMargin = Ui.dpi(act, 6);

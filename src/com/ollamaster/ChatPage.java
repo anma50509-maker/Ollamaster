@@ -267,7 +267,6 @@ public class ChatPage extends Page {
         ((LinearLayout.LayoutParams) historyBtn.getLayoutParams()).rightMargin = Ui.dpi(act, 6);
 
         TextView logBtn = Ui.btnGhost(act, t, "日志");
-        Icon.pinLeft(logBtn, "fileText", 12);
         logBtn.setGravity(Gravity.CENTER);
         logBtn.setOnClickListener(v -> showLogSheet());
         bar.addView(logBtn, new LinearLayout.LayoutParams(
