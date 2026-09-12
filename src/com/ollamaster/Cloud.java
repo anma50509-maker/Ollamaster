@@ -227,6 +227,7 @@ public class Cloud {
                         if (j.optBoolean("done")) {
                             if (inThink[0]) { inThink[0] = false; acc.append("</think>"); cb.delta("</think>"); }
                             cb.finishReason(j.optString("done_reason", "stop"));
+                            cb.usage(j.optLong("prompt_eval_count", 0), j.optLong("eval_count", 0), 0, 0);
                             cb.assistantMsg(acc.toString(), toolsJsonOf(msg), reasoningAcc.toString());
                         }
                     }
