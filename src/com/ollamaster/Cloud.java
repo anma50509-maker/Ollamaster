@@ -146,13 +146,13 @@ public class Cloud {
                             String fr = ch0.optString("finish_reason", "");
                             if (!fr.isEmpty()) cb.finishReason(fr);
                         }
-                        JSONObject usage = j.optJSONObject("usage");
-                        if (usage != null) {
-                            cb.usage(usage.optLong("prompt_tokens", 0),
-                                    usage.optLong("completion_tokens", 0),
-                                    usage.optLong("prompt_cache_hit_tokens", 0),
-                                    usage.optLong("prompt_cache_miss_tokens", 0));
-                        }
+                    }
+                    JSONObject usage = j.optJSONObject("usage");
+                    if (usage != null) {
+                        cb.usage(usage.optLong("prompt_tokens", 0),
+                                usage.optLong("completion_tokens", 0),
+                                usage.optLong("prompt_cache_hit_tokens", 0),
+                                usage.optLong("prompt_cache_miss_tokens", 0));
                     }
                     return true;
                 } catch (Exception e) {
