@@ -266,6 +266,14 @@ public class ChatPage extends Page {
                 ViewGroup.LayoutParams.WRAP_CONTENT, Ui.dpi(act, 30)));
         ((LinearLayout.LayoutParams) historyBtn.getLayoutParams()).rightMargin = Ui.dpi(act, 6);
 
+        TextView logBtn = Ui.btnGhost(act, t, "日志");
+        Icon.pinLeft(logBtn, "fileText", 12);
+        logBtn.setGravity(Gravity.CENTER);
+        logBtn.setOnClickListener(v -> showLogSheet());
+        bar.addView(logBtn, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, Ui.dpi(act, 30)));
+        ((LinearLayout.LayoutParams) logBtn.getLayoutParams()).rightMargin = Ui.dpi(act, 6);
+
         TextView newBtn = Ui.btnPrimary(act, t, "+ 新建");
         newBtn.setGravity(Gravity.CENTER);
         newBtn.setOnClickListener(v -> newConv());
@@ -1534,6 +1542,7 @@ public class ChatPage extends Page {
         thinkOpen = false;
 
         final ConvStore.Msg placeholder = reuse != null ? reuse : new ConvStore.Msg("assistant", "");
+        placeholder.model = useModel;
         if (reuse == null) conv.msgs.add(placeholder);
         refreshViews();
         scrollBottom();
@@ -1584,6 +1593,7 @@ public class ChatPage extends Page {
                             parseCloudTools(placeholder, toolsJson);
                         }
                         @Override public void finishReason(String r) { truncated = "length".equals(r); }
+                        @Override public void usage(long pt, long ct, long hit, long miss) { placeholder.promptTokens = pt; placeholder.cacheHitTokens = hit; }
                         @Override public void error(Exception e) { fail(e, acc); }
                         @Override public void done() { reportDiag(diag, t0); finishTurn(placeholder, acc, meta); }
                     };
@@ -1610,6 +1620,7 @@ public class ChatPage extends Page {
                             markDirty();
                         }
                         @Override public void meta(long evalCount, long evalDurationNs) { meta[0] = evalCount; meta[1] = evalDurationNs; }
+                        @Override public void promptTokens(long count) { placeholder.promptTokens = count; }
                         @Override public ConvStore.Msg assistantMsg(String content, JSONObject raw) {
                             if (acc.length() > 0) placeholder.content = acc.toString();
                             parseOllamaTools(placeholder, raw);
@@ -1736,6 +1747,168 @@ public class ChatPage extends Page {
         });
     }
 
+
+/** 对话日志面板：竖向展示每轮对话的模型、缓存命中率、工具调用、记忆调用等信息 */
+    private void showLogSheet() {
+        if (conv == null || conv.msgs.isEmpty()) {
+            Ui.toast(act, "暂无对话记录");
+            return;
+        }
+        Dialog d = new Dialog(act);
+        d.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+
+        LinearLayout root = new LinearLayout(act);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(t.bg);
+
+        // 标题栏
+        LinearLayout hdr = new LinearLayout(act);
+        hdr.setOrientation(LinearLayout.HORIZONTAL);
+        hdr.setGravity(Gravity.CENTER_VERTICAL);
+        hdr.setPadding(Ui.dpi(act, 16), Ui.dpi(act, 10), Ui.dpi(act, 16), Ui.dpi(act, 8));
+        TextView title = new TextView(act);
+        title.setText("对话日志");
+        title.setTypeface(Ui.serifBold());
+        title.setTextColor(t.textPri);
+        title.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 16));
+        hdr.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        TextView close = Ui.btnGhost(act, t, "关闭");
+        close.setOnClickListener(v -> d.dismiss());
+        hdr.addView(close);
+        root.addView(hdr);
+
+        // 日志列表
+        ScrollView scroll = new ScrollView(act);
+        scroll.setVerticalScrollBarEnabled(true);
+        LinearLayout list = new LinearLayout(act);
+        list.setOrientation(LinearLayout.VERTICAL);
+        list.setPadding(Ui.dpi(act, 14), Ui.dpi(act, 2), Ui.dpi(act, 14), Ui.dpi(act, 14));
+
+        // 遍历消息，提取日志
+        for (int i = 0; i < conv.msgs.size(); i++) {
+            ConvStore.Msg m = conv.msgs.get(i);
+            if ("notice".equals(m.role)) continue;
+            if ("user".equals(m.role)) {
+                // 用户消息：显示简短摘要
+                TextView ul = new TextView(act);
+                String preview = m.content == null ? "" : m.content.replace("\n", " ").trim();
+                if (preview.length() > 50) preview = preview.substring(0, 50) + "…";
+                ul.setText("▸ " + tf.format(new java.util.Date(m.ts)) + " · 用户");
+                ul.setTextColor(t.textSec);
+                ul.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 10));
+                ul.setPadding(Ui.dpi(act, 4), Ui.dpi(act, 8), Ui.dpi(act, 4), Ui.dpi(act, 2));
+                list.addView(ul);
+                if (!preview.isEmpty()) {
+                    TextView ut = new TextView(act);
+                    ut.setText(preview);
+                    ut.setTextColor(t.alpha(t.textPri, 0.7f));
+                    ut.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 11));
+                    ut.setPadding(Ui.dpi(act, 16), 0, Ui.dpi(act, 4), Ui.dpi(act, 4));
+                    list.addView(ut);
+                }
+                continue;
+            }
+            if ("tool".equals(m.role)) {
+                // 工具消息：显示工具名和结果摘要
+                boolean isMem = m.toolName != null && m.toolName.startsWith("mem_");
+                TextView tl = new TextView(act);
+                String tname = m.toolName == null ? "?" : m.toolName;
+                tl.setText("  ⧉ " + tname + (isMem ? "  [记忆]" : ""));
+                tl.setTextColor(isMem ? t.accent : t.alpha(t.accent, 0.85f));
+                tl.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 10.5f));
+                tl.setTypeface(Ui.mono());
+                tl.setPadding(Ui.dpi(act, 16), Ui.dpi(act, 1), Ui.dpi(act, 4), Ui.dpi(act, 1));
+                list.addView(tl);
+                // 结果摘要
+                String preview = m.content == null ? "" : m.content.replace("\n", " ").trim();
+                if (preview.length() > 80) preview = preview.substring(0, 80) + "…";
+                if (!preview.isEmpty()) {
+                    TextView tr = new TextView(act);
+                    tr.setText(preview);
+                    tr.setTextColor(t.alpha(t.textSec, 0.85f));
+                    tr.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 9.5f));
+                    tr.setPadding(Ui.dpi(act, 28), 0, Ui.dpi(act, 4), Ui.dpi(act, 2));
+                    tr.setMaxLines(2);
+                    list.addView(tr);
+                }
+                continue;
+            }
+            if ("assistant".equals(m.role)) {
+                // AI 消息：显示模型、token、缓存命中率、工具调用
+                LinearLayout card = new LinearLayout(act);
+                card.setOrientation(LinearLayout.VERTICAL);
+                card.setBackground(Ui.round(t.alpha(t.accent, 0.06f), Ui.dpi(act, 10)));
+                card.setPadding(Ui.dpi(act, 12), Ui.dpi(act, 8), Ui.dpi(act, 12), Ui.dpi(act, 8));
+                LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                clp.topMargin = Ui.dpi(act, 4);
+                clp.bottomMargin = Ui.dpi(act, 2);
+
+                // 第一行：时间 + 模型
+                TextView r1 = new TextView(act);
+                StringBuilder sb = new StringBuilder();
+                sb.append(tf.format(new java.util.Date(m.ts)));
+                String mname = m.model != null && !m.model.isEmpty() ? m.model : modelShort();
+                sb.append("  ·  ").append(mname);
+                r1.setText(sb);
+                r1.setTextColor(t.textPri);
+                r1.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 11.5f));
+                r1.setTypeface(Ui.mono());
+                card.addView(r1);
+
+                // 第二行：token 统计 + 缓存命中率
+                StringBuilder sb2 = new StringBuilder();
+                if (m.promptTokens > 0) sb2.append("输入 ").append(m.promptTokens);
+                if (m.evalTokens > 0) sb2.append("  ·  输出 ").append(m.evalTokens);
+                if (m.tps > 0) sb2.append("  ·  ").append(String.format(java.util.Locale.US, "%.1f tok/s", m.tps));
+                if (m.cacheHitTokens > 0 && m.promptTokens > 0) {
+                    int rate = (int)(m.cacheHitTokens * 100 / m.promptTokens);
+                    sb2.append("  ·  缓存命中 ").append(rate).append("%");
+                }
+                if (sb2.length() > 0) {
+                    TextView r2 = new TextView(act);
+                    r2.setText(sb2);
+                    r2.setTextColor(t.textSec);
+                    r2.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 10));
+                    r2.setPadding(0, Ui.dpi(act, 2), 0, 0);
+                    card.addView(r2);
+                }
+
+                // 第三行：工具调用列表
+                if (m.tools != null && !m.tools.isEmpty()) {
+                    StringBuilder tsb = new StringBuilder();
+                    int memCount = 0;
+                    for (ConvStore.ToolCall tc : m.tools) {
+                        if (tsb.length() > 0) tsb.append("、");
+                        tsb.append(tc.name);
+                        if (tc.name.startsWith("mem_")) memCount++;
+                    }
+                    TextView r3 = new TextView(act);
+                    r3.setText("工具调用(" + m.tools.size() + "): " + tsb
+                            + (memCount > 0 ? "  [含" + memCount + "次记忆调用]" : ""));
+                    r3.setTextColor(t.alpha(t.accent, 0.8f));
+                    r3.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 9.5f));
+                    r3.setPadding(0, Ui.dpi(act, 2), 0, 0);
+                    card.addView(r3);
+                }
+
+                list.addView(card, clp);
+            }
+        }
+
+        scroll.addView(list, new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        root.addView(scroll, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        d.setContentView(root);
+        android.view.WindowManager.LayoutParams lp = new android.view.WindowManager.LayoutParams();
+        lp.copyFrom(d.getWindow().getAttributes());
+        lp.width = ViewGroup.LayoutParams.MATCH_PARENT;
+        lp.height = ViewGroup.LayoutParams.MATCH_PARENT;
+        d.show();
+        d.getWindow().setAttributes(lp);
+    }
 
     private void fail(Exception e, StringBuilder acc) {
         Ui.H.post(() -> {

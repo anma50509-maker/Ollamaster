@@ -161,7 +161,7 @@ public class WorkPage extends Page {
 
         LinearLayout acts = new LinearLayout(act);
         acts.setOrientation(LinearLayout.HORIZONTAL);
-        String[] labels = {"＋文件", "＋目录", "主工作区", "刷新", "工作区"};
+        String[] labels = {"新建文件", "新建目录", "主工作区", "刷新", "工作区"};
         Runnable[] runs = {this::newFileDialog, this::newDirDialog, this::gotoMainWorkspace,
                 () -> { ensurePerms(); refreshFiles(); }, this::workspaceDialog};
         for (int i = 0; i < labels.length; i++) {
@@ -522,7 +522,7 @@ public class WorkPage extends Page {
 
         LinearLayout acts = new LinearLayout(act);
         acts.setOrientation(LinearLayout.HORIZONTAL);
-        TextView add = Ui.btnPrimary(act, t, "＋ 新建");
+        TextView add = Ui.btnPrimary(act, t, "新建");
         add.setGravity(Gravity.CENTER);
         add.setOnClickListener(v -> editSkill(null));
         TextView imp = Ui.btnGhost(act, t, "导入");
@@ -737,7 +737,7 @@ public class WorkPage extends Page {
         box.addView(Ui.gap(act, 7));
 
         LinearLayout acts = new LinearLayout(act);
-        TextView add = Ui.btnPrimary(act, t, "＋添加服务器");
+        TextView add = Ui.btnPrimary(act, t, "添加服务器");
         add.setGravity(Gravity.CENTER);
         add.setOnClickListener(v -> editServer(null));
         acts.addView(add, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,

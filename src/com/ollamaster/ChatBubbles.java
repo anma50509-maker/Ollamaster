@@ -259,7 +259,14 @@ class ChatBubbles {
         StringBuilder mt = new StringBuilder(cp.tf.format(new Date(m.ts)));
         if (m.evalTokens > 0 && m.tps > 0) mt.append(" · ").append(m.evalTokens)
                 .append(" tok · ").append(String.format(Locale.US, "%.1f tok/s", m.tps));
-        if (!m.content.isEmpty()) mt.append(" · ").append(cp.modelShort());
+        mt.append(" · ").append(m.model != null && !m.model.isEmpty() ? m.model : cp.modelShort());
+        if (m.promptTokens > 0) {
+            mt.append(" · 输入 ").append(m.promptTokens);
+            if (m.cacheHitTokens > 0 && m.promptTokens > 0) {
+                int rate = (int)(m.cacheHitTokens * 100 / m.promptTokens);
+                mt.append(" · 缓存").append(rate).append("%");
+            }
+        }
         meta.setText(mt);
         meta.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 9.5f));
         meta.setTextColor(t.alpha(t.textSec, 0.9f));

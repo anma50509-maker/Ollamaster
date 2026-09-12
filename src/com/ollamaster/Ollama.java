@@ -111,6 +111,7 @@ public class Ollama {
         void error(Exception e);
         void done();
         default void finishReason(String reason) {}
+        default void promptTokens(long count) {}
     }
 
     public static void chat(String host, int port, String body, Http.Cancel cancel, ChatCb cb, int connectTimeoutMs) {
@@ -139,6 +140,7 @@ public class Ollama {
                             long ec = j.optLong("eval_count", 0);
                             long ed = j.optLong("eval_duration", 0);
                             cb.meta(ec, ed);
+                            cb.promptTokens(j.optLong("prompt_eval_count", 0));
                             cb.finishReason(j.optString("done_reason", "stop"));
                             ConvStore.Msg result = cb.assistantMsg(t, msg);
                             if (result != null) result.reasoning = reasoningAcc.toString();

@@ -10,6 +10,7 @@ public class Cloud {
         void error(Exception e);
         void done();
         default void finishReason(String reason) {}
+        default void usage(long pt, long ct, long hit, long miss) {}
     }
 
     public static String url(String baseUrl, String path) {
@@ -141,6 +142,13 @@ public class Cloud {
                         if (!ch0.isNull("finish_reason")) {
                             String fr = ch0.optString("finish_reason", "");
                             if (!fr.isEmpty()) cb.finishReason(fr);
+                        }
+                        JSONObject usage = j.optJSONObject("usage");
+                        if (usage != null) {
+                            cb.usage(usage.optLong("prompt_tokens", 0),
+                                    usage.optLong("completion_tokens", 0),
+                                    usage.optLong("prompt_cache_hit_tokens", 0),
+                                    usage.optLong("prompt_cache_miss_tokens", 0));
                         }
                     }
                     return true;
