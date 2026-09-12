@@ -1737,7 +1737,17 @@ public class ChatPage extends Page {
                 runTurn(CONTINUE_HINT, placeholder);
             } else {
                 contDepth = 0;
-                String body = stripThink(placeholder.content == null ? "" : placeholder.content).trim();
+                String rawC = placeholder.content == null ? "" : placeholder.content;
+                if ((placeholder.reasoning == null || placeholder.reasoning.trim().isEmpty())
+                        && idxOf(rawC, "  implicit") >= 0) {
+                    int ta = idxOf(rawC, "  implicit");
+                    int tb = idxOf(rawC, "  implicit", ta);
+                    if (ta >= 0 && tb < 0) {
+                        String think = rawC.substring(ta + 7).trim();
+                        if (!think.isEmpty()) placeholder.reasoning = think;
+                    }
+                }
+                String body = stripThink(rawC).trim();
                 boolean emptyReply = body.isEmpty()
                         && (placeholder.reasoning == null || placeholder.reasoning.trim().isEmpty());
                 if (emptyReply) {
