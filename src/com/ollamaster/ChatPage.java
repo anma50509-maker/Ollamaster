@@ -1867,6 +1867,8 @@ public class ChatPage extends Page {
                     sb2.append("  ·  缓存命中 ").append(rate).append("%");
                 } else if (m.cacheMissTokens > 0) {
                     sb2.append("  ·  缓存命中 0%");
+                } else if (m.promptTokens > 0) {
+                    sb2.append("  ·  缓存无数据(API未返回)");
                 }
                 if (sb2.length() > 0) {
                     TextView r2 = new TextView(act);
