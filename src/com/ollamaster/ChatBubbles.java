@@ -189,6 +189,17 @@ class ChatBubbles {
             applyThinkBlock(think, "think|" + m.ts, thinkText);
         }
 
+        // 工具调用轮次：content 为空但有工具调用时，显示工具调用摘要，避免空消息观感
+        if (answerText.trim().isEmpty() && m.tools != null && !m.tools.isEmpty()) {
+            StringBuilder tsb = new StringBuilder();
+            for (int ti = 0; ti < m.tools.size() && ti < 3; ti++) {
+                if (ti > 0) tsb.append("、");
+                tsb.append(m.tools.get(ti).name);
+            }
+            if (m.tools.size() > 3) tsb.append(" 等");
+            answerText = "[调用工具 " + tsb + "]";
+        }
+
         // 正文容器：统一圆角背景，内部按 flow 顺序渲染文本块与表格/图片视图（视图停留在原文位置）
         LinearLayout bodyBox = new LinearLayout(act);
         bodyBox.setOrientation(LinearLayout.VERTICAL);
