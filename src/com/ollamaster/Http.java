@@ -27,6 +27,8 @@ public class Http {
         HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
         c.setConnectTimeout(timeoutMs);
         c.setReadTimeout(Math.max(timeoutMs, 600000));
+        // 关键：请求 gzip/deflate 压缩，HttpURLConnection 会自动解压返回
+        c.setRequestProperty("Accept-Encoding", "gzip, deflate");
         return c;
     }
 

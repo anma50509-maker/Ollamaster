@@ -1708,7 +1708,6 @@ public class ChatPage extends Page {
             streamViews.clear();
             busyUi(false);
             syncAgent(false);
-            retryCount = 0;
             retryRun = null;
             if (conv == null) return;
             if (meta[0] > 0 && meta[1] > 0) {
@@ -1726,9 +1725,11 @@ public class ChatPage extends Page {
             boolean hasTools = placeholder.tools != null && !placeholder.tools.isEmpty();
             if (hasTools && !stopped && Prefs.get(act).editMode()) {
                 toolRounds++;
+                retryCount = 0;
                 execToolsThenContinue(placeholder);
             } else if (!hasTools && !stopped && truncated && contDepth < 3 && acc.length() > 0) {
                 contDepth++;
+                retryCount = 0;
                 pushNotice("回复达到最大输出长度被截断，自动续写中（" + contDepth + "/3）");
                 ConvStore.save(act, conv);
                 refreshViews();
@@ -1736,21 +1737,35 @@ public class ChatPage extends Page {
                 runTurn(CONTINUE_HINT, placeholder);
             } else {
                 contDepth = 0;
-                // 修复空消息：模型未返回任何有效内容（无正文、无思考、无工具）时，
-                // 移除空 assistant 气泡，避免对话里累积空白消息
                 String body = stripThink(placeholder.content == null ? "" : placeholder.content).trim();
                 boolean emptyReply = body.isEmpty()
                         && (placeholder.reasoning == null || placeholder.reasoning.trim().isEmpty());
                 if (emptyReply) {
                     conv.msgs.remove(placeholder);
-                    ConvStore.save(act, conv);
-                    refreshViews();
-                    scrollBottom();
-                    pushNotice("模型未返回有效内容，已忽略空回复");
-                } else if (Prefs.get(act).autoTitle() && conv != null
-                        && !streaming && needsTitle()) {
-                    // AI 自主会话命名：一轮完整回复（无工具）且启用时，自动让当前模型为会话起标题
-                    autoTitle();
+                    int max = Prefs.get(act).retryMax();
+                    if (retryCount < max) {
+                        retryCount++;
+                        final long delay = Math.min(2500L * retryCount, 8000);
+                        pushNotice("模型未返回有效内容（" + retryCount + "/" + max + "），"
+                                + (delay / 1000) + " 秒后重试");
+                        ConvStore.save(act, conv);
+                        refreshViews();
+                        scrollBottom();
+                        retryRun = this::runTurn;
+                        Ui.H.postDelayed(retryRun, delay);
+                    } else {
+                        retryCount = 0;
+                        ConvStore.save(act, conv);
+                        refreshViews();
+                        scrollBottom();
+                        pushNotice("模型未返回有效内容，已达重试上限，已忽略空回复");
+                    }
+                } else {
+                    retryCount = 0;
+                    if (Prefs.get(act).autoTitle() && conv != null
+                            && !streaming && needsTitle()) {
+                        autoTitle();
+                    }
                 }
             }
         });
