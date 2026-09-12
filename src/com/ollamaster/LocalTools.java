@@ -458,13 +458,13 @@ public class LocalTools {
         if (query.isEmpty()) throw new Exception("query 不能为空（搜索关键词，尽量具体）");
         int max = Math.min(Math.max(a.optInt("max", 8), 1), 10);
         java.util.Map<String, String> hdr = new java.util.HashMap<>();
-        hdr.put("User-Agent", "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36");
+        hdr.put("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
         hdr.put("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8");
         String q = java.net.URLEncoder.encode(query, "UTF-8");
-        // 主源：百度（中文搜索最准，移动端结果可解析）
-        Http.Resp r = Http.get("https://www.baidu.com/s?wd=" + q, hdr, 15000);
-        if (r.code == 200 && r.body != null && r.body.contains("<h3")) {
-            String parsed = parseBaidu(r.body, query, max);
+        // 主源：360 搜索（中文结果真实可靠，反爬宽松，桌面 UA 即可）
+        Http.Resp r = Http.get("https://www.so.com/s?q=" + q, hdr, 15000);
+        if (r.code == 200 && r.body != null && r.body.contains("res-title")) {
+            String parsed = parse360(r.body, query, max);
             if (!parsed.startsWith("未解析到")) return parsed;
         }
         // 备源：必应（国际/英文查询）
@@ -475,6 +475,47 @@ public class LocalTools {
         }
         String err = r.body == null ? "" : " 百度片段：" + clip(r.body);
         return "[搜索失败] 百度 HTTP " + r.code + " / 必应 HTTP " + r2.code + err;
+    }
+
+    /** 解析 360 搜索 HTML：h3.res-title 标题 + data-mdurl 真实链接 + p.res-desc 摘要（indexOf 版，避正则转义） */
+    private static String parse360(String html, String query, int max) {
+        StringBuilder sb = new StringBuilder("\uD83D\uDD0D 搜索结果（360）：「" + query + "」\n");
+        int idx = 0;
+        int n = 0;
+        while (n < max) {
+            idx = html.indexOf("res-title", idx);
+            if (idx < 0) break;
+            int h3start = html.lastIndexOf("<h3", idx);
+            int h3end = html.indexOf("</h3>", idx);
+            if (h3start < 0 || h3end < 0) break;
+            String block = html.substring(h3start, h3end);
+            String title = stripHtml(block).trim();
+            String link = "";
+            int mi = block.indexOf("data-mdurl=");
+            if (mi >= 0) {
+                int qi = mi + 11;
+                if (qi < block.length() && block.charAt(qi) == '\"') {
+                    int qe = block.indexOf('\"', qi + 1);
+                    if (qe > qi) link = block.substring(qi + 1, qe);
+                }
+            }
+            String snip = "";
+            int di = html.indexOf("res-desc", h3end);
+            if (di >= 0 && di - h3end < 3000) {
+                int ds = html.indexOf('>', di);
+                int de = html.indexOf("</p>", di);
+                if (ds >= 0 && de > ds) snip = stripHtml(html.substring(ds + 1, de)).trim();
+            }
+            idx = h3end;
+            if (title.isEmpty() || title.length() < 3) continue;
+            if (title.contains("其他人还搜") || title.contains("相关搜索") || title.contains("猜您关注")
+                    || title.contains("相关书籍") || title.contains("反馈")) continue;
+            sb.append(n + 1).append(". ").append(title).append("\n");
+            if (!link.isEmpty()) sb.append("   ").append(link).append("\n");
+            if (!snip.isEmpty()) sb.append("   ").append(snip).append("\n");
+            n++;
+        }
+        return n > 0 ? sb.toString().trim() : "未解析到结果";
     }
 
     /** 解析百度搜索 HTML：h3 标题 + 超长 href 链接（m.baidu.com 跳转）+ c-abstract/c-line-clamp 摘要 */
