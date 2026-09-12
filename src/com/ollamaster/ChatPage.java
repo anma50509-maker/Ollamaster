@@ -1736,10 +1736,20 @@ public class ChatPage extends Page {
                 runTurn(CONTINUE_HINT, placeholder);
             } else {
                 contDepth = 0;
-                // AI 自主会话命名：一轮完整回复（无工具）且启用时，自动让当前模型为会话起标题
-                // 强制 AI 会话命名：标题仍是默认占位就自动生成，不依赖 AI 是否记得调 rename_conv
-                if (Prefs.get(act).autoTitle() && conv != null
+                // 修复空消息：模型未返回任何有效内容（无正文、无思考、无工具）时，
+                // 移除空 assistant 气泡，避免对话里累积空白消息
+                String body = stripThink(placeholder.content == null ? "" : placeholder.content).trim();
+                boolean emptyReply = body.isEmpty()
+                        && (placeholder.reasoning == null || placeholder.reasoning.trim().isEmpty());
+                if (emptyReply) {
+                    conv.msgs.remove(placeholder);
+                    ConvStore.save(act, conv);
+                    refreshViews();
+                    scrollBottom();
+                    pushNotice("模型未返回有效内容，已忽略空回复");
+                } else if (Prefs.get(act).autoTitle() && conv != null
                         && !streaming && needsTitle()) {
+                    // AI 自主会话命名：一轮完整回复（无工具）且启用时，自动让当前模型为会话起标题
                     autoTitle();
                 }
             }
