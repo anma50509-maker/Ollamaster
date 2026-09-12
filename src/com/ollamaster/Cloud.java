@@ -43,7 +43,10 @@ public class Cloud {
         try {
             JSONObject o = new JSONObject();
             o.put("model", model);
-            o.put("stream", true);            o.put("temperature", Math.round(p.temperature() * 100) / 100.0);
+            o.put("stream", true);
+            JSONObject so = new JSONObject();
+            so.put("include_usage", true);
+            o.put("stream_options", so);            o.put("temperature", Math.round(p.temperature() * 100) / 100.0);
             o.put("top_p", Math.round(p.topP() * 100) / 100.0);
             o.put("max_tokens", p.maxTokens());
             JSONArray arr = new JSONArray();
