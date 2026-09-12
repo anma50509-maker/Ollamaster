@@ -149,10 +149,19 @@ public class Cloud {
                     }
                     JSONObject usage = j.optJSONObject("usage");
                     if (usage != null) {
-                        cb.usage(usage.optLong("prompt_tokens", 0),
-                                usage.optLong("completion_tokens", 0),
-                                usage.optLong("prompt_cache_hit_tokens", 0),
-                                usage.optLong("prompt_cache_miss_tokens", 0));
+                        long pt = usage.optLong("prompt_tokens", 0);
+                        long ct = usage.optLong("completion_tokens", 0);
+                        long hit = usage.optLong("prompt_cache_hit_tokens", 0);
+                        long miss = usage.optLong("prompt_cache_miss_tokens", 0);
+                        // OpenAI 格式：prompt_tokens_details.cached_tokens
+                        if (hit == 0) {
+                            JSONObject details = usage.optJSONObject("prompt_tokens_details");
+                            if (details != null) {
+                                hit = details.optLong("cached_tokens", 0);
+                                if (hit > 0) miss = Math.max(0, pt - hit);
+                            }
+                        }
+                        cb.usage(pt, ct, hit, miss);
                     }
                     return true;
                 } catch (Exception e) {
