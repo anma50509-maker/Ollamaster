@@ -47,11 +47,13 @@ public class ConvStore {
         /** 计算回传给 API 的 reasoning_content：
          *  优先独立字段 → content 中 thinking 块 → 带 tool_calls 时给非空兜底（严格端点拒绝空串）。 */
         private String reasoningForApi() {
-            if (reasoning != null && !reasoning.isEmpty()) return reasoning;
-            String t = thinkingOf(content);
-            if (!t.isEmpty()) return t;
-            if (tools != null && !tools.isEmpty()) return "（该轮无思考过程记录）";
-            return "";
+            String r = reasoning != null && !reasoning.isEmpty() ? reasoning : thinkingOf(content);
+            if (r.isEmpty()) {
+                if (tools != null && !tools.isEmpty()) return "（该轮无思考过程记录）";
+                return "";
+            }
+            if (r.length() > 2000) r = r.substring(0, 2000) + "\n…（思考链已截断，仅回传前2000字符以节省上下文）";
+            return r;
         }
 
         /** 从带 thinking 标签的 content 中提取思考文本 */
@@ -73,7 +75,7 @@ public class ConvStore {
                 if (imgs.length() > 0) o.put("images", imgs);
                 if ("assistant".equals(role)) {
                     // 思考模型历史工具调用回传 thinking（仅真实思考，避免占位文本污染本地上下文）
-                    if (reasoning != null && !reasoning.isEmpty()) o.put("thinking", reasoning);
+                    if (reasoning != null && !reasoning.isEmpty()) o.put("thinking", reasoningForApi());
                     if (tools != null && !tools.isEmpty()) {
                         JSONArray tc = new JSONArray();
                         for (ToolCall t : tools) {

@@ -1462,7 +1462,37 @@ public class ChatPage extends Page {
                 valid.put(tool);
             }
         }
-        return valid.length() == 0 ? null : valid;
+        return compactSpecs(valid.length() == 0 ? null : valid);
+    }
+
+    /** 压缩工具规格：截断过长的 description 和参数描述，减少每轮请求的固定 token 开销 */
+    private static JSONArray compactSpecs(JSONArray specs) {
+        if (specs == null) return null;
+        try {
+            for (int i = 0; i < specs.length(); i++) {
+                org.json.JSONObject tool = specs.optJSONObject(i);
+                if (tool == null) continue;
+                org.json.JSONObject fn = tool.optJSONObject("function");
+                if (fn == null) continue;
+                String desc = fn.optString("description", "");
+                if (desc.length() > 120) fn.put("description", desc.substring(0, 120) + "\u2026");
+                org.json.JSONObject params = fn.optJSONObject("parameters");
+                if (params != null) {
+                    org.json.JSONObject props = params.optJSONObject("properties");
+                    if (props != null) {
+                        java.util.Iterator<String> keys = props.keys();
+                        while (keys.hasNext()) {
+                            String k = keys.next();
+                            org.json.JSONObject prop = props.optJSONObject(k);
+                            if (prop == null) continue;
+                            String pd = prop.optString("description", "");
+                            if (pd.length() > 60) prop.put("description", pd.substring(0, 60) + "\u2026");
+                        }
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+        return specs;
     }
 
     private void runTurn() { runTurn(null, null); }
@@ -1843,14 +1873,14 @@ public class ChatPage extends Page {
                         org.json.JSONObject a = new org.json.JSONObject(
                                 call.args == null || call.args.trim().isEmpty() ? "{}" : call.args);
                         resultText = LocalTools.call(call.name, a);
-                        if (resultText.length() > 12000) resultText = resultText.substring(0, 12000) + "\n…[输出过长已截断]";
+                        if (resultText.length() > 6000) resultText = resultText.substring(0, 6000) + "\n…[输出过长已截断]";
                     } catch (Exception ex) {
                         resultText = "[工具执行失败] " + ex.getMessage();
                     }
                 } else if (PluginToolExec.isPluginTool(call.name)) {
                     try {
                         resultText = PluginToolExec.exec(call.name, call.args);
-                        if (resultText.length() > 12000) resultText = resultText.substring(0, 12000) + "\n…[输出过长已截断]";
+                        if (resultText.length() > 6000) resultText = resultText.substring(0, 6000) + "\n…[输出过长已截断]";
                     } catch (Exception ex) {
                         resultText = "[插件工具执行失败] " + ex.getMessage();
                     }
@@ -1859,7 +1889,7 @@ public class ChatPage extends Page {
                 } else {
                     try {
                         resultText = McpClient.callTool(found[0], call.name, call.args);
-                        if (resultText.length() > 8000) resultText = resultText.substring(0, 8000) + "\n…[结果过长截断]";
+                        if (resultText.length() > 4000) resultText = resultText.substring(0, 4000) + "\n…[结果过长截断]";
                     } catch (Exception ex) {
                         resultText = "[工具执行失败] " + ex.getMessage();
                     }
