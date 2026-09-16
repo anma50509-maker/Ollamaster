@@ -84,6 +84,8 @@ public class ChatPage extends Page {
     private volatile boolean paused;
     /** 工具循环执行中标志：工具调用期间按钮保持"暂停"态，可随时中断循环 */
     private volatile boolean toolRunning;
+    /** 工作循环进行中标志：从用户发送到整个回合（含多轮工具调用/截断续写/自动重试）结束，按钮全程显示暂停 */
+    private volatile boolean working;
     /** 流式滚动锁定：最新字块在屏时持续跟随；用户上滑翻看历史则解除，滚回底部自动恢复 */
     private volatile boolean followBottom = true;
     ConvStore.Msg streamMsg;
@@ -430,7 +432,7 @@ public class ChatPage extends Page {
     }
 
     private void onSendTap() {
-        if (streaming || toolRunning) {
+        if (working) {
             pauseAgent(true);
             return;
         }
@@ -1424,6 +1426,7 @@ public class ChatPage extends Page {
 
     private void send(String text) {
         paused = false;  // 用户主动输入新消息 → 解除暂停，恢复 AI 自主行为
+        working = true;  // 工作循环开始：按钮全程显示暂停，直至本回合结束
         followBottom = true;  // 用户发新消息 → 重新锁定跟随最新回复
         ensureConv();
         // 酒馆人设卡兼容：全新会话选中了含开场白（first_mes）的人设 → 角色先开口
@@ -1515,6 +1518,7 @@ public class ChatPage extends Page {
 
     private void runTurn(String contHint, ConvStore.Msg reuse) {
         if (conv == null) return;
+        working = true;  // 任一模型调用轮次（含重试/续写/工具后续轮）都属工作循环
         final Prefs p = Prefs.get(act);
         final String useModel;
         final String useUrl, useKey;
@@ -1537,6 +1541,7 @@ public class ChatPage extends Page {
             useKey = null;
         }
         if (useModel == null || useModel.isEmpty()) {
+            working = false;
             pushNotice("未找到可用模型，请检查节点或设置");
             return;
         }
@@ -1714,8 +1719,8 @@ public class ChatPage extends Page {
             busyUi(false);
             syncAgent(false);
             retryRun = null;
-            if (paused) return;  // 已暂停：阻断工具循环/截断续写/自动重试等一切后续调用
-            if (conv == null) return;
+            if (paused) { working = false; return; }  // 已暂停：回合中断，阻断后续调用
+            if (conv == null) { working = false; return; }
             if (meta[0] > 0 && meta[1] > 0) {
                 placeholder.evalTokens = meta[0];
                 placeholder.tps = meta[0] / (meta[1] / 1e9);
@@ -1775,9 +1780,11 @@ public class ChatPage extends Page {
                         refreshViews();
                         scrollBottom();
                         pushNotice("模型未返回有效内容，已达重试上限，已忽略空回复");
+                        working = false;  // 空回复重试达上限 → 回合结束，按钮恢复发送
                     }
                 } else {
                     retryCount = 0;
+                    working = false;  // 本回合（含工具循环/续写/重试）全部结束 → 按钮恢复发送
                     if (Prefs.get(act).autoTitle() && conv != null
                             && !streaming && needsTitle()) {
                         autoTitle();
@@ -1994,6 +2001,7 @@ public class ChatPage extends Page {
                     last.content += "\n\n[" + raw + "]";
                 }
             }
+            working = false;  // 最终失败：工作循环结束，按钮恢复发送
             pushNotice("请求失败：" + raw);
             ConvStore.save(act, conv);
             refreshViews();
@@ -2093,6 +2101,7 @@ public class ChatPage extends Page {
                     Ui.H.post(() -> {
                         if (conv == null) return;
                         toolRunning = false;
+                        working = false;
                         busyUi(false);
                         syncAgent(false);
                         updateLastNotice("已暂停，剩余工具调用已取消");
@@ -2153,10 +2162,12 @@ public class ChatPage extends Page {
                         toolRunning = false;
                         if (paused) {
                             // 已暂停：不再发起后续模型调用
+                            working = false;
                             busyUi(false);
                             syncAgent(false);
                         } else if (taskDone[0]) {
                             pushNotice("任务完成：" + taskSummary[0]);
+                            working = false;
                             busyUi(false);
                             syncAgent(false);
                         } else {
@@ -2171,6 +2182,7 @@ public class ChatPage extends Page {
     void regenerate() {
         if (conv == null || streaming) return;
         paused = false;  // 用户主动重新生成 → 解除暂停
+        working = true;  // 重新生成本身也是工作循环：按钮显示暂停
         while (!conv.msgs.isEmpty()) {
             ConvStore.Msg last = conv.msgs.get(conv.msgs.size() - 1);
             String r = last.role;
@@ -2189,6 +2201,7 @@ public class ChatPage extends Page {
 
     private void stopStream(boolean toast) {
         paused = false;
+        working = false;
         toolRunning = false;
         if (retryRun != null) { Ui.H.removeCallbacks(retryRun); retryRun = null; }
         retryCount = 0;
@@ -2205,6 +2218,7 @@ public class ChatPage extends Page {
      *  进入暂停态；直到用户主动输入新消息才恢复。 */
     private void pauseAgent(boolean toast) {
         paused = true;
+        working = false;
         toolRunning = false;
         if (retryRun != null) { Ui.H.removeCallbacks(retryRun); retryRun = null; }
         retryCount = 0;
@@ -2235,9 +2249,10 @@ public class ChatPage extends Page {
     /** 发送按钮状态：圆形背景 + 居中矢量图标（帧布局 + CENTER 缩放，彻底避免基线偏移） */
     private void updateSendIcon(boolean busy) {
         if (sendBtn == null) return;
+        boolean p = working;  // 工作循环全程显示暂停按钮（含工具/续写/重试间隙），回合结束恢复发送
         ImageView ic = sendBtn.getChildCount() > 0 ? (ImageView) sendBtn.getChildAt(0) : null;
-        if (ic != null) ic.setImageDrawable(Icon.v(act, busy ? "stop" : "send", t.mixTextOn(t), busy ? 18 : 20));
-        GradientDrawable bg = Ui.round(busy ? t.alpha(t.danger, 0.9f) : t.accent, Ui.dpi(act, 999));
+        if (ic != null) ic.setImageDrawable(Icon.v(act, p ? "stop" : "send", t.mixTextOn(t), p ? 18 : 20));
+        GradientDrawable bg = Ui.round(p ? t.alpha(t.danger, 0.9f) : t.accent, Ui.dpi(act, 999));
         sendBtn.setBackground(Ui.ripple(bg, t.alpha(t.textPri, 0.3f)));
     }
 
