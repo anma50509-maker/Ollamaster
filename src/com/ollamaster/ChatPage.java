@@ -80,6 +80,10 @@ public class ChatPage extends Page {
     String model = "";
     private Http.Cancel cancel;
     volatile boolean streaming;
+    /** 暂停标志：点击右下角暂停按钮后置 true，AI 停止输出/工具调用循环/后续自动调用，直到用户主动输入新消息 */
+    private volatile boolean paused;
+    /** 工具循环执行中标志：工具调用期间按钮保持"暂停"态，可随时中断循环 */
+    private volatile boolean toolRunning;
     /** 流式滚动锁定：最新字块在屏时持续跟随；用户上滑翻看历史则解除，滚回底部自动恢复 */
     private volatile boolean followBottom = true;
     ConvStore.Msg streamMsg;
@@ -426,8 +430,8 @@ public class ChatPage extends Page {
     }
 
     private void onSendTap() {
-        if (streaming) {
-            stopStream(true);
+        if (streaming || toolRunning) {
+            pauseAgent(true);
             return;
         }
         String s = input.getText().toString().trim();
@@ -1419,6 +1423,7 @@ public class ChatPage extends Page {
     }
 
     private void send(String text) {
+        paused = false;  // 用户主动输入新消息 → 解除暂停，恢复 AI 自主行为
         followBottom = true;  // 用户发新消息 → 重新锁定跟随最新回复
         ensureConv();
         // 酒馆人设卡兼容：全新会话选中了含开场白（first_mes）的人设 → 角色先开口
@@ -1709,6 +1714,7 @@ public class ChatPage extends Page {
             busyUi(false);
             syncAgent(false);
             retryRun = null;
+            if (paused) return;  // 已暂停：阻断工具循环/截断续写/自动重试等一切后续调用
             if (conv == null) return;
             if (meta[0] > 0 && meta[1] > 0) {
                 placeholder.evalTokens = meta[0];
@@ -1956,6 +1962,7 @@ public class ChatPage extends Page {
             streaming = false;
             busyUi(false);
             syncAgent(false);
+            if (paused) { retryRun = null; return; }  // 已暂停：不再安排自动重试
             if (conv == null) return;
             String raw = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
             String low = raw.toLowerCase(Locale.US);
@@ -2069,6 +2076,7 @@ public class ChatPage extends Page {
 
     private void execToolsThenContinue(ConvStore.Msg assistantMsg) {
         new Thread(() -> {
+            toolRunning = true;  // 线程内立即置位（不等 UI post，避免竞态误判中断）
             final int total = assistantMsg.tools.size();
             final int[] done = {0};
             final boolean[] taskDone = {false};
@@ -2076,9 +2084,21 @@ public class ChatPage extends Page {
             // 立即显示"正在执行"反馈
             Ui.H.post(() -> {
                 if (conv == null) return;
+                busyUi(true);  // 工具执行期间按钮保持"暂停"态，可随时中断调用循环
                 pushNotice("正在执行工具…（0/" + total + "）");
             });
             for (final ConvStore.ToolCall call : assistantMsg.tools) {
+                if (paused || !toolRunning) {
+                    // 已暂停/被停止：取消剩余工具调用并收尾
+                    Ui.H.post(() -> {
+                        if (conv == null) return;
+                        toolRunning = false;
+                        busyUi(false);
+                        syncAgent(false);
+                        updateLastNotice("已暂停，剩余工具调用已取消");
+                    });
+                    break;
+                }
                 Mcps.Server[] found = null;
                 String resultText;
                 if (LocalTools.has(call.name)) {
@@ -2130,7 +2150,12 @@ public class ChatPage extends Page {
                     preview = preview.replace("\n", " ");
                     updateLastNotice("执行中 " + dn + "/" + total + "：" + toolName + " → " + preview);
                     if (dn == total && conv != null) {
-                        if (taskDone[0]) {
+                        toolRunning = false;
+                        if (paused) {
+                            // 已暂停：不再发起后续模型调用
+                            busyUi(false);
+                            syncAgent(false);
+                        } else if (taskDone[0]) {
                             pushNotice("任务完成：" + taskSummary[0]);
                             busyUi(false);
                             syncAgent(false);
@@ -2145,6 +2170,7 @@ public class ChatPage extends Page {
 
     void regenerate() {
         if (conv == null || streaming) return;
+        paused = false;  // 用户主动重新生成 → 解除暂停
         while (!conv.msgs.isEmpty()) {
             ConvStore.Msg last = conv.msgs.get(conv.msgs.size() - 1);
             String r = last.role;
@@ -2162,12 +2188,32 @@ public class ChatPage extends Page {
     }
 
     private void stopStream(boolean toast) {
+        paused = false;
+        toolRunning = false;
         if (retryRun != null) { Ui.H.removeCallbacks(retryRun); retryRun = null; }
         retryCount = 0;
         Ui.H.removeCallbacks(streamHeartbeat);
         if (cancel != null) cancel.stop = true;
         if (streaming && toast) Ui.toast(act, "已停止生成");
         streaming = false;
+        streamViews.clear();
+        busyUi(false);
+        syncAgent(false);
+    }
+
+    /** 暂停 Agent：立即停止当前流式输出，阻断工具调用循环与一切后续自动调用（截断续写/自动重试），
+     *  进入暂停态；直到用户主动输入新消息才恢复。 */
+    private void pauseAgent(boolean toast) {
+        paused = true;
+        toolRunning = false;
+        if (retryRun != null) { Ui.H.removeCallbacks(retryRun); retryRun = null; }
+        retryCount = 0;
+        contDepth = 0;
+        Ui.H.removeCallbacks(streamHeartbeat);
+        if (cancel != null) cancel.stop = true;
+        if (toast) Ui.toast(act, "已暂停，输入新消息后继续");
+        streaming = false;
+        streamMsg = null;
         streamViews.clear();
         busyUi(false);
         syncAgent(false);
