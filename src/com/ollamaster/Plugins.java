@@ -245,14 +245,18 @@ public class Plugins {
     /** 收集所有已启用插件的技能提示词 */
     public static String enabledSkillsPrompt(Context c) {
         StringBuilder sb = new StringBuilder();
+        boolean any = false;
         for (Plugin p : listEnabled(c)) {
             for (Skill s : p.skills) {
                 if (!s.instructions.isEmpty()) {
-                    if (sb.length() > 0) sb.append("\n\n");
-                    sb.append("<skill name=\"").append(s.name).append("\" source=\"plugin\">\n").append(s.instructions).append("\n</skill>");
+                    if (!any) { sb.append("<skills>\n"); any = true; }
+                    sb.append("  <skill name=\"").append(s.name).append("\" source=\"plugin\"");
+                    // Plugin.Skill has no desc field
+                    sb.append(" />\n");
                 }
             }
         }
+        if (any) sb.append("</skills>");
         return sb.toString();
     }
 

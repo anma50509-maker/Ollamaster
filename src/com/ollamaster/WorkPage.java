@@ -531,6 +531,9 @@ public class WorkPage extends Page {
         TextView imp = Ui.btnGhost(act, t, "导入");
         imp.setGravity(Gravity.CENTER);
         imp.setOnClickListener(v -> importSkills());
+        TextView impMd = Ui.btnGhost(act, t, "导入 SKILL.md");
+        impMd.setGravity(Gravity.CENTER);
+        impMd.setOnClickListener(v -> importSkillMd());
         TextView pre = Ui.btnGhost(act, t, "预制");
         pre.setGravity(Gravity.CENTER);
         pre.setOnClickListener(v -> {
@@ -545,6 +548,7 @@ public class WorkPage extends Page {
         l2.rightMargin = Ui.dpi(act, 6);
         acts.addView(add, l1);
         acts.addView(imp, l2);
+        acts.addView(impMd, new LinearLayout.LayoutParams(0, Ui.dpi(act, 36), 1f));
         acts.addView(pre, new LinearLayout.LayoutParams(0, Ui.dpi(act, 36), 1f));
         box.addView(acts);
         box.addView(Ui.gap(act, 4));
@@ -648,6 +652,7 @@ public class WorkPage extends Page {
         box.addView(Ui.gap(act, 8));
         menu(box, "编辑", () -> editSkill(s));
         menu(box, "导出 JSON", () -> exportSkill(s));
+        menu(box, "导出 SKILL.md", () -> exportSkillMd(s));
         menu(box, "删除", () -> {
             skills.remove(s);
             Skills.saveAll(act, skills);
@@ -725,10 +730,31 @@ public class WorkPage extends Page {
         }
     }
 
+    private void exportSkillMd(Skills.S s) {
+        try {
+            pendingExportJson = Skills.toSkillMd(s);
+            pendingExportName = s.name.replaceAll("\\W+", "_") + ".md";
+            Intent in = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+            in.addCategory(Intent.CATEGORY_OPENABLE);
+            in.setType("text/markdown");
+            in.putExtra(Intent.EXTRA_TITLE, pendingExportName);
+            act.startActivityForResult(in, 32);
+        } catch (Exception e) {
+            Ui.toast(act, "导出失败：" + e.getMessage());
+        }
+    }
+
     private void importSkills() {
         Intent in = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         in.addCategory(Intent.CATEGORY_OPENABLE);
         in.setType("*/*");
+        act.startActivityForResult(in, 31);
+    }
+
+    private void importSkillMd() {
+        Intent in = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        in.addCategory(Intent.CATEGORY_OPENABLE);
+        in.setType("text/markdown");
         act.startActivityForResult(in, 31);
     }
 
@@ -1093,22 +1119,32 @@ public class WorkPage extends Page {
         Uri uri = data.getData();
         if (req == 31) {
             try {
-                String json = Http.readAll(act.getContentResolver().openInputStream(uri));
-                org.json.JSONArray arr;
-                try { arr = new org.json.JSONObject(json).optJSONArray("skills"); } catch (Exception e) { arr = null; }
-                if (arr == null) arr = new org.json.JSONArray(json);
+                String text = Http.readAll(act.getContentResolver().openInputStream(uri));
                 List<Skills.S> cur = Skills.list(act);
                 int n = 0;
-                for (int i = 0; i < arr.length(); i++) {
-                    org.json.JSONObject o = arr.getJSONObject(i);
-                    Skills.S s = new Skills.S();
-                    s.id = ConvStore.newId();
-                    s.name = o.optString("name", "skill-" + (cur.size() + 1));
-                    s.desc = o.optString("desc");
-                    s.instructions = o.optString("instructions");
-                    s.enabled = o.optBoolean("enabled", true);
-                    cur.add(s);
-                    n++;
+                // Try parse as JSON array first
+                try {
+                    org.json.JSONArray arr;
+                    try { arr = new org.json.JSONObject(text).optJSONArray("skills"); } catch (Exception e) { arr = null; }
+                    if (arr == null) arr = new org.json.JSONArray(text);
+                    for (int i = 0; i < arr.length(); i++) {
+                        org.json.JSONObject o = arr.getJSONObject(i);
+                        Skills.S s = new Skills.S();
+                        s.id = ConvStore.newId();
+                        s.name = o.optString("name", "skill-" + (cur.size() + 1));
+                        s.desc = o.optString("desc");
+                        s.instructions = o.optString("instructions");
+                        s.enabled = o.optBoolean("enabled", true);
+                        cur.add(s);
+                        n++;
+                    }
+                } catch (Exception e) {
+                    // Not JSON, try parse as SKILL.md (YAML frontmatter + Markdown)
+                    Skills.S s = Skills.parseSkillMd(text);
+                    if (s.instructions != null && !s.instructions.trim().isEmpty()) {
+                        cur.add(s);
+                        n = 1;
+                    }
                 }
                 Skills.saveAll(act, cur);
                 skills = cur;

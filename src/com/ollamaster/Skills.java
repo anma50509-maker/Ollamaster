@@ -68,15 +68,72 @@ public class Skills {
 
     public static String enabledPrompt(Context c) {
         StringBuilder sb = new StringBuilder();
+        boolean any = false;
         for (S s : list(c)) {
             if (s.enabled && !s.instructions.isEmpty()) {
-                if (sb.length() > 0) sb.append("\n\n");
-                sb.append("<skill name=\"").append(s.name).append("\"");
+                if (!any) { sb.append("<skills>\n"); any = true; }
+                sb.append("  <skill name=\"").append(s.name).append("\"");
                 if (!s.desc.isEmpty()) sb.append(" description=\"").append(s.desc.replace("\"", "")).append("\"");
-                sb.append(">\n").append(s.instructions).append("\n</skill>");
+                sb.append(" />\n");
             }
         }
+        if (any) {
+            sb.append("</skills>\n");
+            sb.append("以上为已注册技能的元数据。当任务匹配某技能时，用 load_skill 工具按名称加载完整指令。");
+        }
         return sb.toString();
+    }
+
+    /** 按名称加载单个 Skill 的完整指令（渐进式披露第二层） */
+    public static String loadSkillDetail(Context c, String name) {
+        for (S s : list(c)) {
+            if (s.enabled && s.name.equals(name)) {
+                return s.instructions;
+            }
+        }
+        return null;
+    }
+
+    /** 导出为 SKILL.md 格式（YAML frontmatter + Markdown 正文） */
+    public static String toSkillMd(S s) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("---\n");
+        sb.append("name: ").append(s.name.replaceAll("\\s+", "-").toLowerCase().replaceAll("[^a-z0-9-]", "")).append("\n");
+        sb.append("description: ").append(s.desc.replace("\n", " ")).append("\n");
+        sb.append("---\n\n");
+        sb.append(s.instructions);
+        return sb.toString();
+    }
+
+    /** 从 SKILL.md 内容解析出 Skill（YAML frontmatter + Markdown 正文） */
+    public static S parseSkillMd(String md) {
+        S s = new S();
+        s.id = ConvStore.newId();
+        s.enabled = true;
+        if (md == null || md.trim().isEmpty()) return s;
+        String text = md.trim();
+        if (text.startsWith("---")) {
+            int end = text.indexOf("\n---", 3);
+            if (end > 0) {
+                String fm = text.substring(3, end).trim();
+                String body = text.substring(end + 4).trim();
+                for (String line : fm.split("\n")) {
+                    int colon = line.indexOf(":");
+                    if (colon < 0) continue;
+                    String key = line.substring(0, colon).trim();
+                    String val = line.substring(colon + 1).trim();
+                    if (key.equals("name")) s.name = val;
+                    else if (key.equals("description")) s.desc = val;
+                }
+                s.instructions = body;
+            } else {
+                s.instructions = text;
+            }
+        } else {
+            s.instructions = text;
+        }
+        if (s.name == null || s.name.isEmpty()) s.name = "unnamed-skill";
+        return s;
     }
 
     public static S blank() {

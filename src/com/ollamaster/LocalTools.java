@@ -43,6 +43,8 @@ public class LocalTools {
                     new String[]{"name"}, new String[]{"要删除的技能名称"}, new String[]{"name"}));
             out.put(fn2("list_skills", "列出所有 AI Skill 及其启用状态",
                     new String[]{}, new String[]{}, null));
+            out.put(fn2("load_skill", "按名称加载已启用 Skill 的完整指令内容（渐进式披露第二层）。系统提示词只注入技能元数据，需完整指令时调用此工具",
+                    new String[]{"name"}, new String[]{"要加载的技能名称"}, new String[]{"name"}));
             out.put(fn2("create_mcp", "创建或更新一个 MCP 服务器配置（Streamable HTTP），保存后立即尝试连接并发现工具。同名覆盖",
                     new String[]{"name", "url", "headers_json", "enabled"},
                     new String[]{"服务器名称（唯一标识，同名则更新）", "MCP 端点 URL，如 https://example.com/mcp",
@@ -238,7 +240,7 @@ public class LocalTools {
             case "list_files": case "read_file": case "write_file": case "append_file":
             case "delete_path": case "make_dir": case "run_command":
             case "web_fetch": case "web_open":
-            case "create_skill": case "delete_skill": case "list_skills":
+            case "create_skill": case "delete_skill": case "list_skills": case "load_skill":
             case "create_mcp": case "delete_mcp": case "task_complete":
             case "install_plugin": case "uninstall_plugin":
             case "list_plugins": case "enable_plugin": case "disable_plugin":
@@ -275,6 +277,7 @@ public class LocalTools {
             case "create_skill": return createSkill(args);
             case "delete_skill": return deleteSkill(args);
             case "list_skills": return listSkills();
+            case "load_skill": return loadSkill(args);
             case "create_mcp": return createMcp(args);
             case "delete_mcp": return deleteMcp(args);
             case "task_complete": return "任务已完成：" + args.optString("summary", "无摘要");
@@ -1083,6 +1086,13 @@ public class LocalTools {
             sb.append('\n');
         }
         return sb.toString();
+    }
+
+    private static String loadSkill(JSONObject args) throws Exception {
+        String name = args.getString("name").trim();
+        String detail = Skills.loadSkillDetail(App.inst, name);
+        if (detail == null) throw new Exception("未找到已启用的 Skill「" + name + "」，可用 list_skills 查看现有列表");
+        return detail;
     }
 
     private static String createMcp(JSONObject args) throws Exception {
