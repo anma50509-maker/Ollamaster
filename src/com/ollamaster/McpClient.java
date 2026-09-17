@@ -140,8 +140,7 @@ public class McpClient {
     public static synchronized String callTool(Mcps.Server s, String toolName, String argsJson) throws Exception {
         JSONObject params = new JSONObject();
         params.put("name", toolName);
-        Object args;
-        try { args = new JSONObject(argsJson); } catch (Exception e) { args = new JSONObject(); }
+        Object args = JsonFix.parseObject(argsJson);
         params.put("arguments", args);
         RpcResult r = rpc(s, 3, "tools/call", params);
         if (r.result == null) throw new Exception("空结果");

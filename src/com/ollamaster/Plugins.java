@@ -93,7 +93,7 @@ public class Plugins {
 
     public static Plugin parse(String json) {
         try {
-            JSONObject o = new JSONObject(json);
+            JSONObject o = JsonFix.parseObject(json);
             Plugin p = new Plugin();
             p.id = o.optString("id", "");
             p.name = o.optString("name", p.id);
@@ -165,7 +165,7 @@ public class Plugins {
     /** 安装或更新插件（JSON 字符串 → 写入文件） */
     public static String install(Context c, String json) {
         try {
-            JSONObject o = new JSONObject(json);
+            JSONObject o = JsonFix.parseObject(json);
             String id = o.optString("id", "");
             if (id.isEmpty()) throw new Exception("插件 id 不能为空");
             if (!id.matches("[A-Za-z0-9_\\-]+")) throw new Exception("插件 id 只能包含字母、数字、下划线、连字符");
@@ -194,7 +194,7 @@ public class Plugins {
             File f = fileOf(c, id);
             if (!f.exists()) return false;
             String json = ConvStore.readQuietly(f, 60000);
-            JSONObject o = new JSONObject(json);
+            JSONObject o = JsonFix.parseObject(json);
             o.put("enabled", enabled);
             o.put("updatedAt", System.currentTimeMillis());
             ConvStore.write(f, o.toString());

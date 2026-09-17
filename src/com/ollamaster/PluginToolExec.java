@@ -37,8 +37,7 @@ public class PluginToolExec {
         if (tool == null) throw new Exception("插件「" + owner.name + "」中未找到工具「" + toolName + "」");
 
         JSONObject args;
-        try { args = new JSONObject(argsJson == null || argsJson.trim().isEmpty() ? "{}" : argsJson); }
-        catch (Exception e) { args = new JSONObject(); }
+        args = JsonFix.parseObject(argsJson);
 
         String handlerType = tool.handler.optString("type", "shell");
         switch (handlerType) {

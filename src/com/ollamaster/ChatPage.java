@@ -2116,7 +2116,7 @@ public class ChatPage extends Page {
                 String resultText;
                 if (LocalTools.has(call.name)) {
                     try {
-                        org.json.JSONObject a = new org.json.JSONObject(
+                        org.json.JSONObject a = JsonFix.parseObject(
                                 call.args == null || call.args.trim().isEmpty() ? "{}" : call.args);
                         resultText = LocalTools.call(call.name, a);
                         if (resultText.length() > 6000) resultText = resultText.substring(0, 6000) + "\n…[输出过长已截断]";
@@ -2142,7 +2142,7 @@ public class ChatPage extends Page {
                 }
                 if ("task_complete".equals(call.name)) {
                     try {
-                        org.json.JSONObject a = new org.json.JSONObject(
+                        org.json.JSONObject a = JsonFix.parseObject(
                                 call.args == null || call.args.trim().isEmpty() ? "{}" : call.args);
                         taskSummary[0] = a.optString("summary", "无摘要");
                     } catch (Exception ignored) { taskSummary[0] = resultText; }
