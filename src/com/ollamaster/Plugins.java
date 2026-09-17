@@ -249,7 +249,7 @@ public class Plugins {
             for (Skill s : p.skills) {
                 if (!s.instructions.isEmpty()) {
                     if (sb.length() > 0) sb.append("\n\n");
-                    sb.append("[Plugin Skill: ").append(s.name).append("]\n").append(s.instructions);
+                    sb.append("<skill name=\"").append(s.name).append("\" source=\"plugin\">\n").append(s.instructions).append("\n</skill>");
                 }
             }
         }

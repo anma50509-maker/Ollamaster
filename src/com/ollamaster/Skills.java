@@ -71,7 +71,9 @@ public class Skills {
         for (S s : list(c)) {
             if (s.enabled && !s.instructions.isEmpty()) {
                 if (sb.length() > 0) sb.append("\n\n");
-                sb.append("[Skill: ").append(s.name).append("]\n").append(s.instructions);
+                sb.append("<skill name=\"").append(s.name).append("\"");
+                if (!s.desc.isEmpty()) sb.append(" description=\"").append(s.desc.replace("\"", "")).append("\"");
+                sb.append(">\n").append(s.instructions).append("\n</skill>");
             }
         }
         return sb.toString();

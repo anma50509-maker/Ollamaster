@@ -161,8 +161,8 @@ public class WorkPage extends Page {
 
         LinearLayout acts = new LinearLayout(act);
         acts.setOrientation(LinearLayout.HORIZONTAL);
-        String[] labels = {"新文件", "新目录", "主目录", "刷新"};
-        Runnable[] runs = {this::newFileDialog, this::newDirDialog, this::gotoMainWorkspace,
+        String[] labels = {"新文件", "新目录", "主目录", "工作区", "刷新"};
+        Runnable[] runs = {this::newFileDialog, this::newDirDialog, this::gotoMainWorkspace, this::workspaceDialog,
                 () -> { ensurePerms(); refreshFiles(); }};
         for (int i = 0; i < labels.length; i++) {
             TextView b = Ui.btnGhost(act, t, labels[i]);
