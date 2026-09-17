@@ -177,13 +177,16 @@ class ChatBubbles {
         String raw = m.content == null ? "" : m.content;
         boolean showThink = Prefs.get(act).showThink();
         String thinkText = null, answerText;
-        int ta = ChatPage.idxOf(raw, " <think>");
+        int ta = ChatPage.idxOf(raw, "<think>");
         if (showThink && ta >= 0) {
-            int tb = ChatPage.idxOf(raw, " </think>", ta + 7);
+            int tb = ChatPage.idxOf(raw, "</think>", ta + 7);
             thinkText = tb >= 0 ? raw.substring(ta + 7, tb) : raw.substring(ta + 7);
             answerText = tb >= 0 ? raw.substring(tb + 8) : "";
         } else {
             answerText = ChatPage.stripThink(raw);
+        }
+        if (showThink && (thinkText == null || thinkText.trim().isEmpty())) {
+            thinkText = m.reasoning;
         }
         if (thinkText != null && !thinkText.trim().isEmpty()) {
             applyThinkBlock(think, "think|" + m.ts, thinkText);

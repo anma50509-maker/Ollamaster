@@ -1711,13 +1711,13 @@ public class ChatPage extends Page {
 
     private void finishTurn(ConvStore.Msg placeholder, StringBuilder acc, long[] meta) {
         Ui.H.post(() -> {
+            try {
             Ui.H.removeCallbacks(streamHeartbeat);
             final boolean stopped = cancel != null && cancel.stop;
             streaming = false;
             streamMsg = null;
             streamViews.clear();
             busyUi(false);
-            syncAgent(false);
             retryRun = null;
             if (paused) { working = false; return; }  // 已暂停：回合中断，阻断后续调用
             if (conv == null) { working = false; return; }
@@ -1750,13 +1750,10 @@ public class ChatPage extends Page {
                 contDepth = 0;
                 String rawC = placeholder.content == null ? "" : placeholder.content;
                 if ((placeholder.reasoning == null || placeholder.reasoning.trim().isEmpty())
-                        && idxOf(rawC, "  implicit") >= 0) {
-                    int ta = idxOf(rawC, "  implicit");
-                    int tb = idxOf(rawC, "  implicit", ta);
-                    if (ta >= 0 && tb < 0) {
-                        String think = rawC.substring(ta + 7).trim();
-                        if (!think.isEmpty()) placeholder.reasoning = think;
-                    }
+                        && idxOf(rawC, "<think>") >= 0) {
+                    int ta = idxOf(rawC, "<think>");
+                    int tb = idxOf(rawC, "</think>", ta + 7);
+                    placeholder.reasoning = rawC.substring(ta + 7, tb < 0 ? rawC.length() : tb).trim();
                 }
                 String body = stripThink(rawC).trim();
                 boolean emptyReply = body.isEmpty()
@@ -1790,6 +1787,9 @@ public class ChatPage extends Page {
                         autoTitle();
                     }
                 }
+            }
+            } finally {
+                syncAgent(!paused && (working || streaming || toolRunning || retryRun != null));
             }
         });
     }
@@ -1965,12 +1965,12 @@ public class ChatPage extends Page {
 
     private void fail(Exception e, StringBuilder acc) {
         Ui.H.post(() -> {
+            try {
             Ui.H.removeCallbacks(streamHeartbeat);
             streaming = false;
             busyUi(false);
-            syncAgent(false);
             if (paused) { retryRun = null; return; }  // 已暂停：不再安排自动重试
-            if (conv == null) return;
+            if (conv == null) { working = false; return; }
             String raw = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
             String low = raw.toLowerCase(Locale.US);
             boolean networkErr = retryable(raw);
@@ -1992,6 +1992,7 @@ public class ChatPage extends Page {
                 Ui.H.postDelayed(retryRun, delay);
                 return;
             }
+            retryRun = null;
             retryCount = 0;
             if (acc.length() == 0 && conv != null && !conv.msgs.isEmpty()) {
                 ConvStore.Msg last = conv.msgs.get(conv.msgs.size() - 1);
@@ -2006,6 +2007,9 @@ public class ChatPage extends Page {
             ConvStore.save(act, conv);
             refreshViews();
             refreshEmpty();
+            } finally {
+                syncAgent(!paused && (working || streaming || toolRunning || retryRun != null));
+            }
         });
     }
 
