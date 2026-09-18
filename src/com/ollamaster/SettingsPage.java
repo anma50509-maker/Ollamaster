@@ -706,6 +706,42 @@ public class SettingsPage extends Page {
                     if (p.cloudMode()) act.chatPage().loadModels();
                 }));
         hair(card);
+        // 云端思考链开关：0=跟随默认 1=强制开 2=强制关
+        LinearLayout thinkRow = baseRow(card);
+        rowTitle(thinkRow, "思考链模式", "云端模型的 ReAct 推理开关");
+        LinearLayout seg = new LinearLayout(act);
+        seg.setOrientation(LinearLayout.HORIZONTAL);
+        seg.setGravity(Gravity.CENTER_VERTICAL);
+        String[] segLabels = {"默认", "强制开", "强制关"};
+        int[] segVals = {0, 1, 2};
+        for (int i = 0; i < 3; i++) {
+            final int idx = i;
+            TextView btn = new TextView(act);
+            btn.setText(segLabels[i]);
+            btn.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 11));
+            btn.setGravity(Gravity.CENTER);
+            int cur = p.cloudThinkMode();
+            boolean sel = (cur == segVals[i]);
+            btn.setTextColor(sel ? t.accent : t.textSec);
+            btn.setBackground(Ui.stroke(sel ? t.alpha(t.accent, 0.2f) : Color.TRANSPARENT,
+                    sel ? t.accent : t.border, Ui.dpi(act, 6), Ui.dpi(act, 0.7f)));
+            btn.setPadding(0, Ui.dpi(act, 5), 0, Ui.dpi(act, 5));
+            LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+            if (i > 0) bp.leftMargin = Ui.dpi(act, 4);
+            btn.setOnClickListener(v -> {
+                p.cloudThinkMode(segVals[idx]);
+                for (int j = 0; j < seg.getChildCount(); j++) {
+                    TextView tj = (TextView) seg.getChildAt(j);
+                    boolean s2 = (segVals[j] == segVals[idx]);
+                    tj.setTextColor(s2 ? t.accent : t.textSec);
+                    tj.setBackground(Ui.stroke(s2 ? t.alpha(t.accent, 0.2f) : Color.TRANSPARENT,
+                            s2 ? t.accent : t.border, Ui.dpi(act, 6), Ui.dpi(act, 0.7f)));
+                }
+            });
+            seg.addView(btn, bp);
+        }
+        thinkRow.addView(seg);
+        hair(card);
         rowClick(card, "测试连接", "验证地址与密钥是否可用", () -> new Thread(() -> {
             final String res;
             try {

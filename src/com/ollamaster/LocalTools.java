@@ -8,6 +8,7 @@ import java.io.File;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 
 public class LocalTools {
@@ -51,6 +52,8 @@ public class LocalTools {
                             "可选，自定义请求头 JSON 对象，如 {\"Authorization\":\"Bearer xx\"}",
                             "是否启用，true/false，默认 true"},
                     new String[]{"name", "url"}));
+            out.put(fn2("list_mcps", "列出所有 MCP 服务器配置及其状态",
+                    new String[]{}, new String[]{}, null));
             out.put(fn2("delete_mcp", "按名称删除一个 MCP 服务器配置",
                     new String[]{"name"}, new String[]{"要删除的服务器名称"}, new String[]{"name"}));
             out.put(fn2("task_complete", "标记任务已完成，传入完成摘要。调用后停止工具循环",
@@ -165,6 +168,10 @@ public class LocalTools {
                 new String[]{"title"},
                 new String[]{"新会话标题，简洁中文，不超过 18 字"},
                 new String[]{"title"}));
+            out.put(fn2("load_tool_spec", "按需加载单个工具的完整 Schema（用于渐进式工具发现）。核心工具已预加载，扩展工具需先调用此工具获取完整定义后方可调用",
+                    new String[]{"name"},
+                    new String[]{"工具名称（如 browser_click、mem_write、key_pool_add 等）"},
+                    new String[]{"name"}));
 
         } catch (Exception ignored) {}
         return out;
@@ -241,7 +248,7 @@ public class LocalTools {
             case "delete_path": case "make_dir": case "run_command":
             case "web_fetch": case "web_open":
             case "create_skill": case "delete_skill": case "list_skills": case "load_skill":
-            case "create_mcp": case "delete_mcp": case "task_complete":
+            case "create_mcp": case "list_mcps": case "delete_mcp": case "task_complete":
             case "install_plugin": case "uninstall_plugin":
             case "list_plugins": case "enable_plugin": case "disable_plugin":
             case "create_persona": case "list_personas": case "delete_persona":
@@ -255,7 +262,7 @@ public class LocalTools {
             case "browser_click": case "browser_type": case "browser_scroll":
             case "browser_back": case "browser_eval": case "browser_screenshot":
             case "browser_ua": case "web_vision":
-            case "image_generate": case "rename_conv":
+            case "image_generate": case "rename_conv": case "load_tool_spec":
                 return true;
             default:
                 return false;
@@ -279,6 +286,7 @@ public class LocalTools {
             case "list_skills": return listSkills();
             case "load_skill": return loadSkill(args);
             case "create_mcp": return createMcp(args);
+            case "list_mcps": return listMcps();
             case "delete_mcp": return deleteMcp(args);
             case "task_complete": return "任务已完成：" + args.optString("summary", "无摘要");
             case "install_plugin": return installPlugin(args);
@@ -319,6 +327,7 @@ public class LocalTools {
             case "web_vision": return webVision(args);
             case "image_generate": return imageGenerate(args);
             case "rename_conv": return renameConv(args);
+            case "load_tool_spec": return loadToolSpec(args);
             default: throw new Exception("未知工具: " + name);
         }
     }
@@ -1136,6 +1145,24 @@ public class LocalTools {
         return (update ? "已更新" : "已创建") + " MCP 服务器「" + name + "」→ " + url + "\n" + sb;
     }
 
+    private static String listMcps() throws Exception {
+        java.util.List<Mcps.Server> list = Mcps.list(App.inst);
+        if (list.isEmpty()) return "暂无 MCP 服务器配置";
+        StringBuilder sb = new StringBuilder("MCP 服务器列表（共 " + list.size() + " 个）：\n");
+        for (int i = 0; i < list.size(); i++) {
+            Mcps.Server s = list.get(i);
+            sb.append(i + 1).append(". ").append(s.name).append(" | ").append(s.enabled ? "启用" : "禁用")
+                    .append(" | ").append(s.url).append("\n");
+            if (s.tools != null && s.tools.length() > 0) {
+                sb.append("   工具: ").append(s.tools.length()).append(" 个\n");
+            }
+            if (s.status != null && !s.status.isEmpty()) {
+                sb.append("   状态: ").append(s.status).append("\n");
+            }
+        }
+        return sb.toString();
+    }
+
     private static String deleteMcp(JSONObject args) throws Exception {
         String name = args.getString("name").trim();
         java.util.List<Mcps.Server> list = Mcps.list(App.inst);
@@ -1721,5 +1748,45 @@ public class LocalTools {
         if (cp == null) return "错误：会话页未就绪";
         cp.renameConv(title);
         return "会话已重命名为：「" + title + "」";
+    }
+
+    /** 按需加载单个工具的完整 Schema（渐进式工具发现） */
+    private static String loadToolSpec(JSONObject a) {
+        String name = a.optString("name", "").trim();
+        if (name.isEmpty()) return "错误：name 不能为空";
+        JSONArray allSpecs = specs();
+        for (int i = 0; i < allSpecs.length(); i++) {
+            JSONObject tool = allSpecs.optJSONObject(i);
+            if (tool == null) continue;
+            JSONObject fn = tool.optJSONObject("function");
+            if (fn != null && name.equals(fn.optString("name", ""))) {
+                return tool.toString();
+            }
+        }
+        // 尝试从 MCP 加载
+        try {
+            JSONArray mcpSpecs = Mcps.toolSpecs(Mcps.list(App.inst));
+            for (int i = 0; i < mcpSpecs.length(); i++) {
+                JSONObject tool = mcpSpecs.optJSONObject(i);
+                if (tool == null) continue;
+                JSONObject fn = tool.optJSONObject("function");
+                if (fn != null && name.equals(fn.optString("name", ""))) {
+                    return tool.toString();
+                }
+            }
+        } catch (Exception ignored) {}
+        // 尝试从插件加载
+        try {
+            JSONArray pluginSpecs = Plugins.toolSpecs(App.inst);
+            for (int i = 0; i < pluginSpecs.length(); i++) {
+                JSONObject tool = pluginSpecs.optJSONObject(i);
+                if (tool == null) continue;
+                JSONObject fn = tool.optJSONObject("function");
+                if (fn != null && name.equals(fn.optString("name", ""))) {
+                    return tool.toString();
+                }
+            }
+        } catch (Exception ignored) {}
+        return "未找到名为「" + name + "」的工具。可用 list_settings 查看所有设置，或用 list_skills/list_mcps/list_plugins 了解扩展来源。";
     }
 }

@@ -38,6 +38,11 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 @SuppressWarnings("unused")
 public class ChatPage extends Page {
@@ -49,6 +54,7 @@ public class ChatPage extends Page {
     private EditText input;
     private FrameLayout sendBtn;
     private TextView modelChip, personaChip, sysChip;
+    private TextView tierChip;
     private TextView autoTtsBtn;
     private ImageView attachBtn;
     private LinearLayout attachRow;
@@ -216,6 +222,15 @@ public class ChatPage extends Page {
         bar.setGravity(Gravity.CENTER_VERTICAL);
         bar.setPadding(Ui.dpi(act, 14), Ui.dpi(act, 2), Ui.dpi(act, 14), Ui.dpi(act, 6));
 
+        tierChip = Ui.chip(act, t, "\u5e73\u8861", false);
+        Icon.pinLeft(tierChip, "sliders", 12);
+        Icon.pinRight(tierChip, "chevronDown", 10);
+        tierChip.setGravity(Gravity.CENTER);
+        tierChip.setOnClickListener(v -> dialogs.tierSheet());
+        bar.addView(tierChip, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, Ui.dpi(act, 30)));
+        ((LinearLayout.LayoutParams) tierChip.getLayoutParams()).rightMargin = Ui.dpi(act, 6);
+
         modelChip = Ui.chip(act, t, "模型", false);
         Icon.pinRight(modelChip, "chevronDown", 10);
         modelChip.setGravity(Gravity.CENTER);
@@ -224,6 +239,7 @@ public class ChatPage extends Page {
                 ViewGroup.LayoutParams.WRAP_CONTENT, Ui.dpi(act, 30)));
         LinearLayout.LayoutParams mlp = (LinearLayout.LayoutParams) modelChip.getLayoutParams();
         mlp.rightMargin = Ui.dpi(act, 6);
+
 
         personaChip = Ui.chip(act, t, "人设", false);
         Icon.pinLeft(personaChip, "star", 11);
@@ -926,6 +942,18 @@ public class ChatPage extends Page {
         }
         String chipText = mShort;
         if (!provider.isEmpty()) chipText += " · " + provider;
+        // 档位芯片：显示当前档位名 + 温度速览
+        Prefs.ModelTier ct = currentTier();
+        if (tierChip != null && ct != null) {
+            tierChip.setText(ct.name);
+            tierChip.setTextColor(ct.id.equals(Prefs.get(act).modelTier()) ? t.mixTextOn(t) : t.textSec);
+            tierChip.setBackground(ct.id.equals(Prefs.get(act).modelTier())
+                    ? Ui.round(t.accent, Ui.dpi(act, 999))
+                    : Ui.ripple(Ui.round(t.alpha(t.textPri, 0.06f), Ui.dpi(act, 999)), t.alpha(t.textPri, 0.15f)));
+            tierChip.setCompoundDrawables(null, null, null, null);
+            Icon.pinLeft(tierChip, "sliders", 12);
+            Icon.pinRight(tierChip, "chevronDown", 10);
+        }
         modelChip.setText(chipText);
         modelChip.setCompoundDrawables(null, null, null, null);
         Icon.pinRight(modelChip, "chevronDown", 10);
@@ -952,7 +980,7 @@ public class ChatPage extends Page {
         emptyAvatar.setImageDrawable(d != null ? d : Icon.v(act, "avatar", t.accent, 34));
     }
 
-    /** 供 LocalTools 设置变更后刷新顶部状态（模型/人设/系统/自动语音） */
+    /** 供 LocalTools 设置变更后刷新顶部状态（模型/人设/系统/自动语音/档位） */
     public void refreshChips() {
         if (act == null) return;
         updateChips();
@@ -967,6 +995,7 @@ public class ChatPage extends Page {
                     : Ui.ripple(Ui.round(t.alpha(t.textPri, 0.06f), Ui.dpi(act, 999)), t.alpha(t.textPri, 0.15f)));
         }
     }
+
 
     /** 提取用于朗读的纯文本：去掉思考链与 Markdown 符号 */
     static String stripForSpeech(String s) {
@@ -1117,6 +1146,21 @@ public class ChatPage extends Page {
             sb.append("4. 任务完成时，必须调用 task_complete 工具并传入完成摘要，禁止仅用文字说明已完成\n");
             sb.append("5. 你可以根据中间结果自主决定下一步操作，无需等待用户确认\n");
             sb.append("重要：禁止仅用文字描述步骤或声称无法完成，必须实际调用工具。");
+            // 动态环境上下文注入：让 AI 即时感知可用资源，减少探索性调用
+            try {
+                int memCount = MemoryStore.list(act).size();
+                int mcpCount = Mcps.list(act).size();
+                int modelCount = modelEntries != null ? modelEntries.size() : 0;
+                StringBuilder env = new StringBuilder();
+                if (memCount > 0) env.append("记忆库 ").append(memCount).append(" 条；");
+                if (mcpCount > 0) env.append("MCP 服务器 ").append(mcpCount).append(" 台；");
+                if (modelCount > 1) env.append("已配模型 ").append(modelCount).append(" 个；");
+                if (env.length() > 0) {
+                    sb.append("\n[实时环境感知] ");
+                    sb.append(env);
+                    sb.append("已知资源优先使用，避免重复探索。");
+                }
+            } catch (Exception ignored) {}
         }
         return sb.toString();
     }
@@ -1140,6 +1184,51 @@ public class ChatPage extends Page {
                 hist.add(m);
             }
         }
+
+        // 2) Token 预算控制：maxPromptTokens 生效
+        int maxTokens = Prefs.get(act).maxPromptTokens();
+        if (maxTokens > 0) {
+            // 估算固定开销：系统提示 + 工具 Schema
+            int fixedOverhead = estimateTokens(sys);
+            if (withTools) {
+                JSONArray specs = toolSpecsIfAny();
+                if (specs != null) fixedOverhead += estimateTokens(specs.toString());
+            }
+            int budget = maxTokens - fixedOverhead;
+            if (budget < 4096) budget = 4096; // 留最小预算，保证近期上下文
+
+            // 智能裁剪：先保留全部消息但截断早期 tool 结果，超预算再丢弃最旧消息
+            // 第一步：对超出近期窗口的 tool 消息做内容截断（保留头部关键信息）
+            int recentWindow = Math.max(4, hist.size() / 2); // 最近 50% 或至少 4 条不截断
+            int truncateStart = Math.max(0, hist.size() - recentWindow);
+            for (int i = 0; i < truncateStart; i++) {
+                ConvStore.Msg m = hist.get(i);
+                if ("tool".equals(m.role) && m.content != null && m.content.length() > 500) {
+                    m.content = smartTruncateTool(m.content, 500);
+                }
+            }
+            // 第二步：从最新往旧计算 token，超出预算时丢弃最旧消息
+            long totalTokens = 0;
+            int keepFrom = hist.size();
+            for (int i = hist.size() - 1; i >= 0; i--) {
+                ConvStore.Msg m = hist.get(i);
+                int msgTokens = estimateMsgTokens(m);
+                if (totalTokens + msgTokens > budget) break;
+                totalTokens += msgTokens;
+                keepFrom = i;
+            }
+            if (keepFrom > 0) {
+                hist = new ArrayList<>(hist.subList(keepFrom, hist.size()));
+            }
+        } else {
+            // 兼容旧逻辑：ctxMsgs 硬截断
+            int keep = Math.max(0, Prefs.get(act).ctxMsgs());
+            if (hist.size() > keep) {
+                hist = hist.subList(hist.size() - keep, hist.size());
+            }
+        }
+
+        // 3) 旧有摘要逻辑（基于字符阈值触发）
         int from = 0;
         String sum = "";
         int threshold = Math.max(16000, Prefs.get(act).summaryKb() * 1000);
@@ -1174,7 +1263,7 @@ public class ChatPage extends Page {
         while (from < hist.size() && "tool".equals(hist.get(from).role)) from++;
         if (from > 0 && !sum.isEmpty()) {
             ConvStore.Msg s = new ConvStore.Msg("system",
-                    "【此前对话摘要】\n" + sum + "\n（以上为更早对话的自动摘要，最新消息在下方，以最新内容为准）");
+                    "【此前对话摘要】\n" + sum + "\n（以上为更早对话的自动摘要，最新内容在下方，以最新内容为准）");
             out.add(s);
         }
         out.addAll(hist.subList(from, hist.size()));
@@ -1191,12 +1280,12 @@ public class ChatPage extends Page {
                 if ("tool".equals(n.role) && n.toolCallId != null) responded.add(n.toolCallId);
                 else if (!"tool".equals(n.role)) break;
             }
-            java.util.ArrayList<ConvStore.ToolCall> keep = new java.util.ArrayList<>();
+            java.util.ArrayList<ConvStore.ToolCall> keptTools = new java.util.ArrayList<>();
             for (ConvStore.ToolCall tc : m.tools) {
-                if (tc.id != null && responded.contains(tc.id)) keep.add(tc);
+                if (tc.id != null && responded.contains(tc.id)) keptTools.add(tc);
             }
-            if (keep.isEmpty()) m.tools = null;
-            else if (keep.size() != m.tools.size()) m.tools = keep;
+            if (keptTools.isEmpty()) m.tools = null;
+            else if (keptTools.size() != m.tools.size()) m.tools = keptTools;
         }
         // 第二步：删除 tool_call_id 在前面对应 assistant 的 tool_calls 中找不到精确匹配的孤立 tool 消息
         for (int i = out.size() - 1; i >= 0; i--) {
@@ -1216,6 +1305,31 @@ public class ChatPage extends Page {
         }
 
         return out;
+    }
+
+    /** 粗略估算 token 数：中文约 1 token/1.5-2 字符，英文约 1 token/4 字符，取 1 token/2 字符 */
+    /** 智能截断 tool 结果：保留头部（最关键的摘要/状态信息），用标记省略中间 */
+    private static String smartTruncateTool(String content, int keepChars) {
+        if (content == null || content.length() <= keepChars) return content;
+        String head = content.substring(0, keepChars);
+        return head + "\n...[tool 结果已压缩，原始 " + content.length() + " 字符]";
+    }
+
+    private static int estimateTokens(String s) {
+        if (s == null || s.isEmpty()) return 0;
+        return s.length() / 2 + 1;
+    }
+
+    /** 估算单条消息的 token 数（含 role、content、tool_calls、tool 结果） */
+    private static int estimateMsgTokens(ConvStore.Msg m) {
+        int tokens = estimateTokens(m.role) + estimateTokens(m.content);
+        if (m.tools != null) {
+            for (ConvStore.ToolCall tc : m.tools) {
+                tokens += estimateTokens(tc.name) + estimateTokens(tc.args);
+            }
+        }
+        if (m.toolName != null) tokens += estimateTokens(m.toolName);
+        return tokens;
     }
 
     private static long charsOf(List<ConvStore.Msg> hist, int from, int to) {
@@ -1247,7 +1361,8 @@ public class ChatPage extends Page {
         }
         if (sb.length() == 0) return conv.summary;
         final int kb = (int) (sb.length() / 1000);
-        Ui.H.post(() -> pushNotice("正在压缩早期对话（约 " + Math.max(kb, 1) + "k 字符）为摘要…"));
+        // 阻塞式摘要：暂停对话直到摘要完成
+        pushNotice("正在压缩早期对话（约 " + Math.max(kb, 1) + "k 字符）为摘要…");
         String summed = summarizeSync(sb.toString());
         if (summed.isEmpty()) return conv.summary;
         conv.summary = summed;
@@ -1261,6 +1376,7 @@ public class ChatPage extends Page {
             final Prefs p = Prefs.get(act);
             final StringBuilder out = new StringBuilder();
             final Exception[] err = {null};
+            final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
             String sys = "你是对话摘要器。将对话历史压缩为一份简洁的中文摘要，供 AI 接续工作使用。"
                     + "必须保留：用户的目标与要求、已做出的关键决定、重要文件路径/命令/代码要点、"
                     + "已完成与未完成事项、遗留错误。直接输出摘要正文，禁止任何开场白或评论。";
@@ -1269,7 +1385,6 @@ public class ChatPage extends Page {
             ms.put(new JSONObject().put("role", "user").put("content", transcript));
             if (p.cloudMode()) {
                 String useModel = model.isEmpty() ? p.cloudModels().split("[,，]")[0].trim() : model;
-                // 查找当前模型对应的服务商 URL 和 Key
                 String sumUrl = p.cloudUrl(), sumKey = p.cloudKey();
                 for (ModelEntry me : modelEntries) {
                     if (me.name.equals(useModel)) {
@@ -1287,8 +1402,8 @@ public class ChatPage extends Page {
                 Cloud.chat(sumUrl, sumKey, body.toString(), new Http.Cancel(), new Cloud.ChatCb() {
                     @Override public void delta(String t) { if (out.length() < 6000) out.append(t); }
                     @Override public void assistantMsg(String s, String tj, String r) {}
-                    @Override public void error(Exception e) { err[0] = e; }
-                    @Override public void done() {}
+                    @Override public void error(Exception e) { err[0] = e; latch.countDown(); }
+                    @Override public void done() { latch.countDown(); }
                 }, p.timeoutSec() * 1000);
             } else {
                 if (model == null || model.isEmpty()) return "";
@@ -1304,10 +1419,12 @@ public class ChatPage extends Page {
                     @Override public void delta(String t) { if (out.length() < 6000) out.append(t); }
                     @Override public void meta(long e, long d) {}
                     @Override public ConvStore.Msg assistantMsg(String s, JSONObject raw) { return null; }
-                    @Override public void error(Exception e) { err[0] = e; }
-                    @Override public void done() {}
+                    @Override public void error(Exception e) { err[0] = e; latch.countDown(); }
+                    @Override public void done() { latch.countDown(); }
                 }, p.timeoutSec() * 1000);
             }
+            // 阻塞等待摘要完成（最多等待 timeoutSec 秒）
+            latch.await(p.timeoutSec(), java.util.concurrent.TimeUnit.SECONDS);
             if (err[0] != null) return "";
             String s = out.toString().trim();
             if (s.length() > 4000) s = s.substring(0, 4000);
@@ -1464,19 +1581,54 @@ public class ChatPage extends Page {
 
     private JSONArray toolSpecsIfAny() {
         if (!Prefs.get(act).editMode()) return null;
-        JSONArray specs = LocalTools.specs();
-        JSONArray mcp = Mcps.toolSpecs(Mcps.list(act));
-        for (int i = 0; i < mcp.length(); i++) specs.put(mcp.optJSONObject(i));
-        // 插件定义的自定义工具
-        JSONArray ptools = Plugins.toolSpecs(act);
-        for (int i = 0; i < ptools.length(); i++) specs.put(ptools.optJSONObject(i));
-        // 过滤掉缺少 type 字段的无效工具
+        // 核心工具：文件/终端/网络/技能/MCP/任务完成/插件/人设/记忆/TTS/设置/密钥池/搜索/浏览器/生图/重命名
+        // 扩展工具：browser_*、mem_*、key_pool_*、plugin_* 管理、create_skill/delete_skill、create_mcp/delete_mcp
+        // 仅注入核心工具，扩展工具由 AI 按需通过 load_skill / list_settings 等获取
+        String[] coreNames = {
+            "list_files", "read_file", "write_file", "append_file", "delete_path", "make_dir", "run_command",
+            "web_fetch", "web_open", "web_search",
+            "list_skills", "load_skill",
+            "list_mcps", "create_mcp", "delete_mcp",
+            "task_complete",
+            "list_plugins", "enable_plugin", "disable_plugin",
+            "create_persona", "list_personas", "delete_persona",
+            "mem_list", "mem_read", "mem_search", "mem_write", "mem_update", "mem_delete", "mem_stats",
+            "tts_speak", "tts_stop",
+            "list_settings", "get_setting", "set_setting",
+            "key_pool_list", "key_pool_add", "key_pool_remove", "key_pool_update",
+            "browser_open", "browser_status", "browser_extract", "browser_click", "browser_type",
+            "browser_scroll", "browser_back", "browser_eval", "browser_screenshot", "browser_ua",
+            "web_vision",
+            "image_generate",
+            "rename_conv",
+            "load_tool_spec"
+        };
+        java.util.Set<String> coreSet = new java.util.HashSet<>(java.util.Arrays.asList(coreNames));
         JSONArray valid = new JSONArray();
+        // 1) 内置工具：按核心白名单过滤（分层加载，扩展工具由 load_tool_spec 按需获取）
+        JSONArray specs = LocalTools.specs();
         for (int i = 0; i < specs.length(); i++) {
             org.json.JSONObject tool = specs.optJSONObject(i);
-            if (tool != null && tool.has("type") && tool.has("function")) {
+            if (tool == null) continue;
+            org.json.JSONObject fn = tool.optJSONObject("function");
+            String name = fn != null ? fn.optString("name", "") : "";
+            if (tool.has("type") && tool.has("function") && coreSet.contains(name)) {
                 valid.put(tool);
             }
+        }
+        // 2) MCP 工具：全量注入（用户显式启用，不受核心白名单限制——修复 MCP 工具未注入的 bug）
+        JSONArray mcp = Mcps.toolSpecs(Mcps.list(act));
+        for (int i = 0; i < mcp.length(); i++) {
+            org.json.JSONObject tool = mcp.optJSONObject(i);
+            if (tool == null) continue;
+            if (tool.has("type") && tool.has("function")) valid.put(tool);
+        }
+        // 3) 插件工具：全量注入（用户显式启用）
+        JSONArray ptools = Plugins.toolSpecs(act);
+        for (int i = 0; i < ptools.length(); i++) {
+            org.json.JSONObject tool = ptools.optJSONObject(i);
+            if (tool == null) continue;
+            if (tool.has("type") && tool.has("function")) valid.put(tool);
         }
         return compactSpecs(valid.length() == 0 ? null : valid);
     }
@@ -2090,103 +2242,240 @@ public class ChatPage extends Page {
         return null;
     }
 
+    /** 并行执行工具的线程池（核心 4 线程，最大 8，队列无界） */
+    private static final java.util.concurrent.ExecutorService TOOL_EXEC_POOL =
+            new java.util.concurrent.ThreadPoolExecutor(
+                    4, 8, 60, java.util.concurrent.TimeUnit.SECONDS,
+                    new java.util.concurrent.LinkedBlockingQueue<>(),
+                    r -> { Thread t = new Thread(r, "om-tool-exec"); t.setDaemon(true); return t; });
+
+    /** 工具结果自动摘要阈值：超过此字符数触发摘要（默认 4000 字符约 1.3k token） */
+    private static int toolResultSummaryThreshold() {
+        return Prefs.get(App.inst).summaryKb() * 1000 / 4; // 复用 summaryKb 设置，约 1/4 作为单工具阈值
+    }
+
+    /** 对超长工具结果进行摘要（后台同步调用模型） */
+    private String summarizeToolResult(String toolName, String result) {
+        if (result == null || result.length() <= toolResultSummaryThreshold()) return result;
+        try {
+            final Prefs p = Prefs.get(act);
+            final StringBuilder out = new StringBuilder();
+            final Exception[] err = {null};
+            final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+            // 摘要调用超时 = 总超时的一半，避免阻塞过久
+            int sumTimeout = p.timeoutSec() * 500; // 秒→半秒
+            String sys = "你是工具结果摘要器。将工具执行结果压缩为简洁摘要，保留关键信息：文件路径、关键数据、错误信息、操作结果状态。直接输出摘要，禁止开场白。";
+            String user = "工具：" + toolName + "\n\n原始结果（" + result.length() + " 字符）：\n" + result;
+            JSONArray ms = new JSONArray();
+            ms.put(new JSONObject().put("role", "system").put("content", sys));
+            ms.put(new JSONObject().put("role", "user").put("content", user));
+            if (p.cloudMode()) {
+                String useModel = model.isEmpty() ? p.cloudModels().split("[,，]")[0].trim() : model;
+                String sumUrl = p.cloudUrl(), sumKey = p.cloudKey();
+                for (ModelEntry me : modelEntries) {
+                    if (me.name.equals(useModel)) {
+                        if (!me.url.isEmpty()) sumUrl = me.url;
+                        if (!me.key.isEmpty()) sumKey = me.key;
+                        break;
+                    }
+                }
+                JSONObject body = new JSONObject();
+                body.put("model", useModel);
+                body.put("stream", true);
+                body.put("temperature", 0.2);
+                body.put("max_tokens", 800);
+                body.put("messages", ms);
+                Cloud.chat(sumUrl, sumKey, body.toString(), new Http.Cancel(), new Cloud.ChatCb() {
+                    @Override public void delta(String t) { if (out.length() < 3000) out.append(t); }
+                    @Override public void assistantMsg(String s, String tj, String r) {}
+                    @Override public void error(Exception e) { err[0] = e; latch.countDown(); }
+                    @Override public void done() { latch.countDown(); }
+                }, p.timeoutSec() * 1000);
+            } else {
+                if (model == null || model.isEmpty()) return result;
+                JSONObject body = new JSONObject();
+                body.put("model", model);
+                body.put("stream", true);
+                JSONObject opt = new JSONObject();
+                opt.put("temperature", 0.2);
+                opt.put("num_predict", 800);
+                body.put("options", opt);
+                body.put("messages", ms);
+                Ollama.chat(p.host(), p.port(), body.toString(), new Http.Cancel(), new Ollama.ChatCb() {
+                    @Override public void delta(String t) { if (out.length() < 3000) out.append(t); }
+                    @Override public void meta(long e, long d) {}
+                    @Override public ConvStore.Msg assistantMsg(String s, JSONObject raw) { return null; }
+                    @Override public void error(Exception e) { err[0] = e; latch.countDown(); }
+                    @Override public void done() { latch.countDown(); }
+                }, p.timeoutSec() * 1000);
+            }
+            try { latch.await(p.timeoutSec(), java.util.concurrent.TimeUnit.SECONDS); } catch (InterruptedException ignored) {}
+            if (err[0] != null || out.length() == 0) {
+                // 超时/失败：智能截断保留头部，不直接丢弃全部
+                return "[工具结果摘要超时，已智能截断]\n" + smartTruncateTool(result, 1500);
+            }
+            String summarized = out.toString().trim();
+            if (summarized.length() >= result.length()) return result; // 摘要不比原文短则放弃
+            return "[工具结果已自动摘要，原长 " + result.length() + " 字符]\n" + summarized;
+        } catch (Exception e) {
+            return "[工具结果摘要异常，已智能截断]\n" + smartTruncateTool(result, 1500);
+        }
+    }
+
     private void execToolsThenContinue(ConvStore.Msg assistantMsg) {
+        if (assistantMsg.tools == null || assistantMsg.tools.isEmpty()) return;
+
         new Thread(() -> {
-            toolRunning = true;  // 线程内立即置位（不等 UI post，避免竞态误判中断）
-            final int total = assistantMsg.tools.size();
-            final int[] done = {0};
+            toolRunning = true;
+            final List<ConvStore.ToolCall> calls = assistantMsg.tools;
+            final int total = calls.size();
             final boolean[] taskDone = {false};
             final String[] taskSummary = {""};
+            final Object pauseLock = new Object();
+
             // 立即显示"正在执行"反馈
             Ui.H.post(() -> {
                 if (conv == null) return;
-                busyUi(true);  // 工具执行期间按钮保持"暂停"态，可随时中断调用循环
+                busyUi(true);
                 pushNotice("正在执行工具…（0/" + total + "）");
             });
-            for (final ConvStore.ToolCall call : assistantMsg.tools) {
-                if (paused || !toolRunning) {
-                    // 已暂停/被停止：取消剩余工具调用并收尾
-                    Ui.H.post(() -> {
-                        if (conv == null) return;
-                        toolRunning = false;
-                        working = false;
-                        busyUi(false);
-                        syncSendBtn();
-                        syncAgent(false);
-                        updateLastNotice("已暂停，剩余工具调用已取消");
+
+            // 将工具按执行器分组：LocalTools / Plugin / MCP
+            // 每组内部并行，组间串行（避免 MCP 连接竞争）
+            final List<List<ConvStore.ToolCall>> groups = new ArrayList<>();
+            List<ConvStore.ToolCall> local = new ArrayList<>();
+            List<ConvStore.ToolCall> plugin = new ArrayList<>();
+            List<ConvStore.ToolCall> mcp = new ArrayList<>();
+
+            for (ConvStore.ToolCall c : calls) {
+                if (LocalTools.has(c.name)) local.add(c);
+                else if (PluginToolExec.isPluginTool(c.name)) plugin.add(c);
+                else mcp.add(c);
+            }
+            if (!local.isEmpty()) groups.add(local);
+            if (!plugin.isEmpty()) groups.add(plugin);
+            if (!mcp.isEmpty()) groups.add(mcp);
+
+            int completed = 0;
+
+            for (List<ConvStore.ToolCall> group : groups) {
+                if (paused || !toolRunning) break;
+
+                final CountDownLatch latch = new CountDownLatch(group.size());
+                final String[] results = new String[group.size()];
+                final boolean[] hasTaskComplete = {false};
+                final String[] taskCompleteSummary = {""};
+
+                for (int i = 0; i < group.size(); i++) {
+                    final int idx = i;
+                    final ConvStore.ToolCall call = group.get(i);
+
+                    TOOL_EXEC_POOL.execute(() -> {
+                        try {
+                            String resultText;
+                            if (LocalTools.has(call.name)) {
+                                org.json.JSONObject a = JsonFix.parseObject(
+                                        call.args == null || call.args.trim().isEmpty() ? "{}" : call.args);
+                                resultText = LocalTools.call(call.name, a);
+                                if (resultText.length() > 6000) resultText = resultText.substring(0, 6000) + "\n…[输出过长已截断]";
+                            } else if (PluginToolExec.isPluginTool(call.name)) {
+                                resultText = PluginToolExec.exec(call.name, call.args);
+                                if (resultText.length() > 6000) resultText = resultText.substring(0, 6000) + "\n…[输出过长已截断]";
+                            } else {
+                                Mcps.Server[] found = findServerFor(call.name);
+                                if (found == null) {
+                                    resultText = "[未找到可执行该工具的服务器: " + call.name + "]";
+                                } else {
+                                    resultText = McpClient.callTool(found[0], call.name, call.args);
+                                    if (resultText.length() > 4000) resultText = resultText.substring(0, 4000) + "\n…[结果过长截断]";
+                                }
+                            }
+
+                            if ("task_complete".equals(call.name)) {
+                                try {
+                                    org.json.JSONObject a = JsonFix.parseObject(
+                                            call.args == null || call.args.trim().isEmpty() ? "{}" : call.args);
+                                    taskCompleteSummary[0] = a.optString("summary", "无摘要");
+                                } catch (Exception ignored) { taskCompleteSummary[0] = resultText; }
+                                hasTaskComplete[0] = true;
+                                taskDone[0] = true;
+                            }
+
+                            results[idx] = resultText;
+                        } catch (Exception ex) {
+                            results[idx] = "[工具执行异常] " + ex.getMessage();
+                        } finally {
+                            latch.countDown();
+                        }
                     });
+                }
+
+                // 等待本组所有工具完成
+                try {
+                    latch.await();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
                     break;
                 }
-                Mcps.Server[] found = null;
-                String resultText;
-                if (LocalTools.has(call.name)) {
-                    try {
-                        org.json.JSONObject a = JsonFix.parseObject(
-                                call.args == null || call.args.trim().isEmpty() ? "{}" : call.args);
-                        resultText = LocalTools.call(call.name, a);
-                        if (resultText.length() > 6000) resultText = resultText.substring(0, 6000) + "\n…[输出过长已截断]";
-                    } catch (Exception ex) {
-                        resultText = "[工具执行失败] " + ex.getMessage();
+
+                // 按原顺序收集结果并写入对话
+                for (int i = 0; i < group.size(); i++) {
+                    if (paused || !toolRunning) break;
+
+                    ConvStore.ToolCall call = group.get(i);
+                    String rt = results[i];
+
+                    // 工具结果自动摘要（超长时压缩，避免上下文爆炸）
+                    if (!"task_complete".equals(call.name)) {
+                        rt = summarizeToolResult(call.name, rt);
                     }
-                } else if (PluginToolExec.isPluginTool(call.name)) {
-                    try {
-                        resultText = PluginToolExec.exec(call.name, call.args);
-                        if (resultText.length() > 6000) resultText = resultText.substring(0, 6000) + "\n…[输出过长已截断]";
-                    } catch (Exception ex) {
-                        resultText = "[插件工具执行失败] " + ex.getMessage();
-                    }
-                } else if ((found = findServerFor(call.name)) == null) {
-                    resultText = "[未找到可执行该工具的服务器: " + call.name + "]";
-                } else {
-                    try {
-                        resultText = McpClient.callTool(found[0], call.name, call.args);
-                        if (resultText.length() > 4000) resultText = resultText.substring(0, 4000) + "\n…[结果过长截断]";
-                    } catch (Exception ex) {
-                        resultText = "[工具执行失败] " + ex.getMessage();
-                    }
-                }
-                if ("task_complete".equals(call.name)) {
-                    try {
-                        org.json.JSONObject a = JsonFix.parseObject(
-                                call.args == null || call.args.trim().isEmpty() ? "{}" : call.args);
-                        taskSummary[0] = a.optString("summary", "无摘要");
-                    } catch (Exception ignored) { taskSummary[0] = resultText; }
-                    taskDone[0] = true;
-                }
-                done[0]++;
-                final String rt = resultText;
-                final int dn = done[0];
-                final String toolName = call.name;
-                // 实时更新进度 notice
-                Ui.H.post(() -> {
-                    if (conv == null) return;
+
                     ConvStore.Msg tm = new ConvStore.Msg("tool", rt);
-                    tm.toolName = toolName;
+                    tm.toolName = call.name;
                     tm.toolCallId = call.id;
                     conv.msgs.add(tm);
-                    String preview = rt.length() > 60 ? rt.substring(0, 60) + "…" : rt;
-                    preview = preview.replace("\n", " ");
-                    updateLastNotice("执行中 " + dn + "/" + total + "：" + toolName + " → " + preview);
-                    if (dn == total && conv != null) {
-                        toolRunning = false;
-                        if (paused) {
-                            // 已暂停：不再发起后续模型调用
-                            working = false;
-                            busyUi(false);
-                            syncSendBtn();
-                            syncAgent(false);
-                        } else if (taskDone[0]) {
-                            pushNotice("任务完成：" + taskSummary[0]);
-                            working = false;
-                            busyUi(false);
-                            syncSendBtn();
-                            syncAgent(false);
-                        } else {
-                            runTurn();
-                        }
+
+                    completed++;
+                    final int dn = completed;
+                    final String toolName = call.name;
+                    final String preview = rt.length() > 60 ? rt.substring(0, 60) + "…" : rt.replace("\n", " ");
+
+                    Ui.H.post(() -> {
+                        if (conv == null) return;
+                        updateLastNotice("执行中 " + dn + "/" + total + "：" + toolName + " → " + preview);
+                    });
+
+                    if (hasTaskComplete[0]) {
+                        taskSummary[0] = taskCompleteSummary[0];
                     }
-                });
+                }
             }
+
+            // 所有组执行完毕，UI 线程收尾
+            Ui.H.post(() -> {
+                if (conv == null) return;
+                toolRunning = false;
+                ConvStore.save(act, conv);
+                refreshViews();
+                scrollBottom();
+
+                if (paused) {
+                    working = false;
+                    busyUi(false);
+                    syncSendBtn();
+                    syncAgent(false);
+                    updateLastNotice("已暂停，剩余工具调用已取消");
+                } else if (taskDone[0]) {
+                    pushNotice("任务完成：" + taskSummary[0]);
+                    working = false;
+                    busyUi(false);
+                    syncSendBtn();
+                    syncAgent(false);
+                } else {
+                    runTurn();
+                }
+            });
+
         }).start();
     }
 
@@ -2333,7 +2622,106 @@ public class ChatPage extends Page {
         if (p.cloudMode()) p.activeCloudModel(name);
         else p.activeModel(name);
         if (conv != null) conv.model = name;
+        // 档位语义 = 模型 + 采样参数预设：切换模型后同步当前档位参数，保持一致
+        Prefs.ModelTier ct = currentTier();
+        if (ct != null) {
+            p.temperature(ct.temperature);
+            p.topP(ct.topP);
+            p.maxTokens(ct.maxTokens);
+            p.stream(ct.stream);
+        }
     }
+
+    // ==================== 模型档位 ====================
+
+    /** 全部档位：内置 + 自定义 */
+    java.util.List<Prefs.ModelTier> allTiers() {
+        java.util.List<Prefs.ModelTier> out = new java.util.ArrayList<>();
+        for (Prefs.ModelTier mt : Prefs.getBuiltinTiers()) out.add(mt);
+        try {
+            org.json.JSONObject o = new org.json.JSONObject(Prefs.get(act).customTiersJson());
+            java.util.Iterator<String> it = o.keys();
+            while (it.hasNext()) {
+                String id = it.next();
+                org.json.JSONObject j = o.optJSONObject(id);
+                if (j == null) continue;
+                out.add(new Prefs.ModelTier(id, j.optString("name", id),
+                        j.optString("desc", "自定义档位"), j.optString("model", ""),
+                        (float) j.optDouble("temperature", 0.7), j.optInt("maxTokens", 2048),
+                        (float) j.optDouble("topP", 0.9), j.optBoolean("stream", true)));
+            }
+        } catch (Exception ignored) {}
+        return out;
+    }
+
+    /** 当前档位（找不到则回退 balanced） */
+    Prefs.ModelTier currentTier() {
+        String id = Prefs.get(act).modelTier();
+        for (Prefs.ModelTier mt : allTiers()) if (mt.id.equals(id)) return mt;
+        return Prefs.getBuiltinTiers()[1];
+    }
+
+    static String tierParamBrief(Prefs.ModelTier mt) {
+        return "\u6e29\u5ea6 " + String.format(java.util.Locale.US, "%.2f", mt.temperature)
+                + " \u00b7 \u4e0a\u9650 " + mt.maxTokens
+                + " \u00b7 topP " + String.format(java.util.Locale.US, "%.2f", mt.topP)
+                + (mt.stream ? " \u00b7 \u6d41\u5f0f" : "");
+    }
+
+    /** 应用档位：写入采样参数，并（档位绑定了模型时）切换模型 */
+    void applyTier(Prefs.ModelTier tier) {
+        if (tier == null) return;
+        Prefs p = Prefs.get(act);
+        p.modelTier(tier.id);
+        p.temperature(tier.temperature);
+        p.topP(tier.topP);
+        p.maxTokens(tier.maxTokens);
+        p.stream(tier.stream);
+        if (tier.model != null && !tier.model.isEmpty()) {
+            model = tier.model;
+            applyActiveModel(tier.model);
+        }
+        updateChips();
+        Ui.toast(act, "\u5df2\u5207\u6362\u6863\u4f4d\uff1a" + tier.name + "\uff08" + tierParamBrief(tier) + "\uff09");
+    }
+
+    /** 将当前模型与采样参数另存为自定义档位 */
+    boolean saveCurrentAsTier(String name) {
+        if (name == null || name.trim().isEmpty()) return false;
+        Prefs p = Prefs.get(act);
+        String id = "custom_" + System.currentTimeMillis();
+        try {
+            org.json.JSONObject o = new org.json.JSONObject(p.customTiersJson());
+            org.json.JSONObject j = new org.json.JSONObject();
+            j.put("name", name.trim());
+            j.put("desc", "\u81ea\u5b9a\u4e49 \u00b7 " + (model.isEmpty() ? "\u5f53\u524d\u6a21\u578b" : model));
+            j.put("model", model);
+            j.put("temperature", p.temperature());
+            j.put("maxTokens", p.maxTokens());
+            j.put("topP", p.topP());
+            j.put("stream", p.stream());
+            o.put(id, j);
+            p.customTiersJson(o.toString());
+        } catch (Exception e) { return false; }
+        p.modelTier(id);
+        updateChips();
+        return true;
+    }
+
+    /** 删除自定义档位 */
+    void deleteCustomTier(String id) {
+        if (id == null || id.isEmpty()) return;
+        Prefs p = Prefs.get(act);
+        try {
+            org.json.JSONObject o = new org.json.JSONObject(p.customTiersJson());
+            o.remove(id);
+            p.customTiersJson(o.toString());
+            if (p.modelTier().equals(id)) p.modelTier("balanced");
+        } catch (Exception ignored) {}
+        updateChips();
+    }
+
+
 
     @Override
     public void onShow() {

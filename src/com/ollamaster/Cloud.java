@@ -53,6 +53,26 @@ public class Cloud {
             for (ConvStore.Msg m : msgs) arr.put(m.toJsonOpenAI());
             o.put("messages", arr);
             if (tools != null && tools.length() > 0) o.put("tools", tools);
+            // 思考链开关：根据 cloudThinkMode 与模型/接口类型决定是否注入 enable_thinking / thinking
+            int thinkMode = p.cloudThinkMode();
+            String url = p.cloudUrl() != null ? p.cloudUrl().toLowerCase() : "";
+            boolean isDeepSeek = url.contains("deepseek");
+            boolean isMoonshot = url.contains("moonshot") || url.contains("kimis") || model.contains("moonshot") || model.contains("kimi");
+            boolean isQwen = model.contains("qwen") || url.contains("dashscope") || url.contains("qwen");
+            boolean isSiliconFlow = url.contains("siliconflow") || url.contains("silicon-flow");
+            if (isDeepSeek && thinkMode > 0) {
+                // DeepSeek 用 enable_thinking 布尔
+                o.put("enable_thinking", thinkMode == 1);
+            } else if ((isMoonshot || isQwen || isSiliconFlow) && thinkMode > 0) {
+                // 这些厂商大多支持 thinking 对象 或 enable_thinking
+                if (isMoonshot) {
+                    JSONObject think = new JSONObject();
+                    think.put("type", thinkMode == 1 ? "enabled" : "disabled");
+                    o.put("thinking", think);
+                } else {
+                    o.put("enable_thinking", thinkMode == 1);
+                }
+            }
             return o.toString();
         } catch (Exception e) {
             return "{}";

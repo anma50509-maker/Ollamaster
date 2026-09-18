@@ -78,8 +78,7 @@ public class ConvStore {
                 JSONArray imgs = imagesB64();
                 if (imgs.length() > 0) o.put("images", imgs);
                 if ("assistant".equals(role)) {
-                    // 思考模型历史工具调用回传 thinking（仅真实思考，避免占位文本污染本地上下文）
-                    if (reasoning != null && !reasoning.isEmpty()) o.put("thinking", reasoningForApi());
+                    // 思考模型历史工具调用不需要回传 thinking（节省 token，与 1.9.2 行为一致）
                     if (tools != null && !tools.isEmpty()) {
                         JSONArray tc = new JSONArray();
                         for (ToolCall t : tools) {
@@ -120,15 +119,7 @@ public class ConvStore {
                     o.put("content", "assistant".equals(role) ? apiContent() : apiUserContent());
                 }
                 if ("assistant".equals(role)) {
-                    // 始终传 reasoning_content（API 要求 thinking + tool_calls 时必须传）
-                    // 三层防御：真实 reasoning → content 中 thinking 块 → 带 tool_calls 时非空兜底
-                    // （部分 DeepSeek 兼容端点拒绝空串 reasoning_content，见官方文档 Tool Calls 章节）
-                    String rc = reasoningForApi();
-                    if (!rc.isEmpty()) {
-                        o.put("reasoning_content", rc);
-                    } else if (tools != null && !tools.isEmpty()) {
-                        o.put("reasoning_content", "");
-                    }
+                    // 思考模型历史工具调用不需要回传 reasoning_content（节省 token，与 1.9.2 行为一致）
                     if (tools != null && !tools.isEmpty()) {
                         JSONArray tc = new JSONArray();
                         for (ToolCall t : tools) {
