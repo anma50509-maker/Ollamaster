@@ -174,7 +174,7 @@ public class SettingsPage extends Page {
 
     private interface Fmt { String apply(int v); }
 
-    private void sliderRow(LinearLayout parent, String title, int min, int max,
+    private TextView sliderRow(LinearLayout parent, String title, int min, int max,
                            int cur, final Fmt fmt, final SliderCb cb) {
         LinearLayout row = baseRow(parent);
         row.setOrientation(LinearLayout.VERTICAL);
@@ -212,6 +212,37 @@ public class SettingsPage extends Page {
         });
         row.addView(sb, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT));
+        return val;
+    }
+
+
+    /** 当前档位简述 */
+    private String tierSummary() {
+        try {
+            return act.chatPage() == null ? "平衡" : act.chatPage().currentTier().name;
+        } catch (Throwable e) { return "平衡"; }
+    }
+
+    /** 自定义档位列表 */
+    private java.util.List<Prefs.ModelTier> customTierList() {
+        java.util.List<Prefs.ModelTier> out = new java.util.ArrayList<>();
+        for (Prefs.ModelTier mt : Prefs.getBuiltinTiers()) out.add(mt);
+        int builtin = out.size();
+        java.util.List<Prefs.ModelTier> only = new java.util.ArrayList<>();
+        try {
+            org.json.JSONObject o = new org.json.JSONObject(Prefs.get(act).customTiersJson());
+            java.util.Iterator<String> it = o.keys();
+            while (it.hasNext()) {
+                String id = it.next();
+                org.json.JSONObject j = o.optJSONObject(id);
+                if (j == null) continue;
+                only.add(new Prefs.ModelTier(id, j.optString("name", id),
+                        j.optString("desc", "自定义档位"), j.optString("model", ""),
+                        (float) j.optDouble("temperature", 0.7), j.optInt("maxTokens", 2048),
+                        (float) j.optDouble("topP", 0.9), j.optBoolean("stream", true)));
+            }
+        } catch (Exception ignored) {}
+        return only;
     }
 
     private void buildModeSection(LinearLayout root) {
@@ -447,6 +478,41 @@ public class SettingsPage extends Page {
         hair(card);
         sliderRow(card, "最大上下文（超出自动总结）", 16, 1024, p.summaryKb(),
                 v -> v >= 1024 ? "1M 字符" : v + "k 字符", v -> p.summaryKb(v));
+        hair(card);
+        // 最大提示词 Token 预算：0 = 不限制；单位千 token
+        final TextView budgetVal = sliderRow(card, "提示词 Token 预算", 0, 200,
+                Math.min(200, p.maxPromptTokens() / 1000),
+                v -> v == 0 ? "不限制" : v + "k tokens", v -> p.maxPromptTokens(v * 1000));
+        hair(card);
+        // 模型档位管理：将当前模型与采样参数另存为自定义档位
+        rowClick(card, "模型档位", tierSummary(), () -> {
+            String[] acts = {"另存当前为档位", "删除自定义档位", "重置为默认档位"};
+            new android.app.AlertDialog.Builder(act)
+                    .setTitle("模型档位")
+                    .setItems(acts, (d, w) -> {
+                        if (w == 0) {
+                            inputDialog("另存为档位", "输入档位名称", "我的档位", false, false, s2 -> {
+                                if (act.chatPage() != null && act.chatPage().saveCurrentAsTier(s2)) {
+                                    Ui.toast(act, "已保存档位：" + s2);
+                                }
+                            });
+                        } else if (w == 1) {
+                            final java.util.List<Prefs.ModelTier> cs = customTierList();
+                            if (cs.isEmpty()) { Ui.toast(act, "暂无自定义档位"); return; }
+                            final String[] names = new String[cs.size()];
+                            for (int i = 0; i < cs.size(); i++) names[i] = cs.get(i).name;
+                            new android.app.AlertDialog.Builder(act)
+                                    .setTitle("删除自定义档位")
+                                    .setItems(names, (d2, w2) -> {
+                                        if (act.chatPage() != null) act.chatPage().deleteCustomTier(cs.get(w2).id);
+                                        Ui.toast(act, "已删除：" + names[w2]);
+                                    }).show();
+                        } else {
+                            if (act.chatPage() != null) act.chatPage().applyTier(Prefs.getBuiltinTiers()[1]);
+                            Ui.toast(act, "已重置为「平衡」档位");
+                        }
+                    }).show();
+        });
         hair(card);
         sliderRow(card, "失败自动重试", 0, 6, p.retryMax(),
                 v -> v == 0 ? "关闭" : "最多 " + v + " 次", v -> p.retryMax(v));
