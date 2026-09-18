@@ -102,6 +102,8 @@ public class Cloud {
         final java.util.SortedMap<Integer, StringBuilder> tcArgs = new java.util.TreeMap<>();
         Http.postStream(url(base, "/chat/completions"), body, h, cancel, new Http.StreamCb() {
             private boolean inThink = false;
+            private boolean parsedOk = false;
+            private final StringBuilder peek = new StringBuilder();
             private StringBuilder slot(java.util.SortedMap<Integer, StringBuilder> m, int idx) {
                 StringBuilder sb = m.get(idx);
                 if (sb == null) { sb = new StringBuilder(); m.put(idx, sb); }
@@ -116,9 +118,23 @@ public class Cloud {
                     } else if (line.startsWith("{")) {
                         d = line;
                     } else {
+                        if (peek.length() < 300) peek.append(line).append(' ');
                         return true;
                     }
                     JSONObject j = new JSONObject(d);
+                    parsedOk = true;
+                    if (peek.length() < 300) {
+                        peek.append(d.length() > 300 ? d.substring(0, 300) : d).append(' ');
+                    }
+                    // 部分网关 HTTP 200 却在流里塞错误对象，必须曝出，否则表现为「空回复」
+                    if (j.has("error") && !j.isNull("error")) {
+                        Object er = j.opt("error");
+                        String em = er instanceof JSONObject
+                                ? ((JSONObject) er).optString("message", er.toString())
+                                : String.valueOf(er);
+                        cb.error(new Exception("服务端返回错误：" + em));
+                        return false;
+                    }
                     JSONArray chs = j.optJSONArray("choices");
                     if (chs != null && chs.length() > 0) {
                         JSONObject ch0 = chs.getJSONObject(0);
@@ -191,6 +207,16 @@ public class Cloud {
             @Override public void onError(Exception e) { cb.error(e); }
             @Override public void onDone() {
                 if (inThink) { inThink = false; acc.append("</think>"); cb.delta("</think>"); }
+                // 一行都没解析成 JSON：多为网关忽略 stream、整包返回、或 200 返回了错误页。
+                // 把原始片段交给上层展示，避免误报成「模型空回复」而掩盖真实原因。
+                // 注意：解析成功但 content 为空属于真·空回复，仍交给上层做空回复重试。
+                if (!parsedOk) {
+                    String pk = peek.toString().trim();
+                    if (pk.length() > 220) pk = pk.substring(0, 220);
+                    cb.error(new Exception("服务端未返回可解析内容"
+                            + (pk.isEmpty() ? "（响应为空）" : "：" + pk)));
+                    return;
+                }
                 String toolsJson = null;
                 if (!tcNames.isEmpty()) {
                     try {
@@ -236,9 +262,13 @@ public class Cloud {
         final StringBuilder reasoningAcc = new StringBuilder();
         final boolean[] inThink = {false};
         Http.postStream(url(root, "/api/chat"), body, h, cancel, new Http.StreamCb() {
+            private final StringBuilder peek = new StringBuilder();
+            private boolean parsedOk = false;
             @Override public boolean onLine(String line) {
                 try {
+                    if (peek.length() < 300) peek.append(line).append(' ');
                     JSONObject j = new JSONObject(line);
+                    parsedOk = true;
                     if (j.has("error")) { cb.error(new Exception(j.getString("error"))); return false; }
                     JSONObject msg = j.optJSONObject("message");
                     if (msg != null) {
@@ -266,7 +296,16 @@ public class Cloud {
                 }
             }
             @Override public void onError(Exception e) { cb.error(e); }
-            @Override public void onDone() { cb.done(); }
+            @Override public void onDone() {
+                if (!parsedOk) {
+                    String pk = peek.toString().trim();
+                    if (pk.length() > 220) pk = pk.substring(0, 220);
+                    cb.error(new Exception("服务端未返回可解析内容"
+                            + (pk.isEmpty() ? "（响应为空）" : "：" + pk)));
+                    return;
+                }
+                cb.done();
+            }
         }, connectTimeoutMs);
     }
 

@@ -121,8 +121,8 @@ public class Http {
         try {
             c = conn(url, connectTimeoutMs);
             // 流级空闲超时：read() 阻塞超过此时长抛 SocketTimeoutException → onError → 可重试。
-            // 取 max(连接超时*3, 60s)：思考模型首 token 慢可容忍，但流中途静默掐断不会挂 10 分钟
-            c.setReadTimeout(Math.max(connectTimeoutMs * 3, 60000));
+            // 取 max(连接超时*3, 120s)：思考模型首 token 常超 60s，放宽到 2 分钟兼顾忍耐与不挂死
+            c.setReadTimeout(Math.max(connectTimeoutMs * 3, 120000));
             c.setRequestMethod("POST");
             c.setDoOutput(true);
             c.setRequestProperty("Content-Type", "application/json");
@@ -152,6 +152,12 @@ public class Http {
                 } else if (ch != '\r') {
                     lineBuf.write(ch);
                 }
+            }
+            // 冲刷结尾残缺行：不少网关把 SSE 整包返回且末尾无换行，或不支持 stream 时直接回一个
+            // JSON 对象（同样无换行）。不冲刷会让整条响应被静默丢弃，上层只能看到「未返回有效内容」。
+            if (!cancel.stop && lineBuf.size() > 0) {
+                String tail = new String(lineBuf.toByteArray(), StandardCharsets.UTF_8).trim();
+                if (!tail.isEmpty()) cb.onLine(tail);
             }
             cb.onDone();
         } catch (Exception e) {

@@ -118,9 +118,13 @@ public class Ollama {
         Http.postStream(base(host, port) + "/api/chat", body, null, cancel, new Http.StreamCb() {
             private boolean inThink = false;
             private final StringBuilder reasoningAcc = new StringBuilder();
+            private final StringBuilder peek = new StringBuilder();
+            private boolean parsedOk = false;
             @Override public boolean onLine(String line) {
                 try {
+                    if (peek.length() < 300) peek.append(line).append(' ');
                     JSONObject j = new JSONObject(line);
+                    parsedOk = true;
                     if (j.has("error")) { cb.error(new Exception(j.getString("error"))); return false; }
                     JSONObject msg = j.optJSONObject("message");
                     if (msg != null) {
@@ -151,7 +155,16 @@ public class Ollama {
                     return true;
                 }
             }
-            @Override public void onDone() { cb.done(); }
+            @Override public void onDone() {
+                if (!parsedOk) {
+                    String pk = peek.toString().trim();
+                    if (pk.length() > 220) pk = pk.substring(0, 220);
+                    cb.error(new Exception("服务端未返回可解析内容"
+                            + (pk.isEmpty() ? "（响应为空）" : "：" + pk)));
+                    return;
+                }
+                cb.done();
+            }
             @Override public void onError(Exception e) { cb.error(e); }
         }, connectTimeoutMs);
     }

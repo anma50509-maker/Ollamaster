@@ -1669,6 +1669,11 @@ public class ChatPage extends Page {
             "（系统提示：你上一条回复因达到最大输出长度被截断。请从中断处直接继续输出剩余内容，"
                     + "保持连贯，不要重复已有内容，不要重新开始。）";
 
+    /** 只输出了思考过程却没给正文（token 被推理吃满）时的续写提示：要求直接给结论，别再长篇推理 */
+    private static final String CONTINUE_HINT_NO_BODY =
+            "（系统提示：你上一条回复的推理过程占满了输出预算，导致正文为空。"
+                    + "请立刻直接给出最终回答正文，不要再展开冗长推理。）";
+
     private void runTurn(String contHint, ConvStore.Msg reuse) {
         if (conv == null) return;
         working = true;  // 任一模型调用轮次（含重试/续写/工具后续轮）都属工作循环
@@ -1892,13 +1897,17 @@ public class ChatPage extends Page {
                 retryCount = 0;
                 execToolsThenContinue(placeholder);
             } else if (!hasTools && !stopped && truncated && contDepth < 3 && acc.length() > 0) {
+                // 推理吃满预算、正文为空的场景改用「直接给结论」提示，避免续写又续到推理里
+                boolean noBody = stripThink(acc.toString()).trim().isEmpty();
                 contDepth++;
                 retryCount = 0;
-                pushNotice("回复达到最大输出长度被截断，自动续写中（" + contDepth + "/3）");
+                pushNotice(noBody ? "推理占满输出预算、正文为空，正在要求模型直接作答（"
+                                + contDepth + "/3）"
+                        : "回复达到最大输出长度被截断，自动续写中（" + contDepth + "/3）");
                 ConvStore.save(act, conv);
                 refreshViews();
                 scrollBottom();
-                runTurn(CONTINUE_HINT, placeholder);
+                runTurn(noBody ? CONTINUE_HINT_NO_BODY : CONTINUE_HINT, placeholder);
             } else {
                 contDepth = 0;
                 String rawC = placeholder.content == null ? "" : placeholder.content;
