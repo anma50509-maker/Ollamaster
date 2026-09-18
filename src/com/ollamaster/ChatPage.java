@@ -1428,6 +1428,7 @@ public class ChatPage extends Page {
         paused = false;  // 用户主动输入新消息 → 解除暂停，恢复 AI 自主行为
         working = true;  // 工作循环开始：按钮全程显示暂停，直至本回合结束
         followBottom = true;  // 用户发新消息 → 重新锁定跟随最新回复
+        syncSendBtn();
         ensureConv();
         // 酒馆人设卡兼容：全新会话选中了含开场白（first_mes）的人设 → 角色先开口
         if (persona != null && persona.firstMes != null && !persona.firstMes.trim().isEmpty()
@@ -1719,8 +1720,8 @@ public class ChatPage extends Page {
             streamViews.clear();
             busyUi(false);
             retryRun = null;
-            if (paused) { working = false; return; }  // 已暂停：回合中断，阻断后续调用
-            if (conv == null) { working = false; return; }
+            if (paused) { working = false; syncSendBtn(); return; }  // 已暂停：回合中断，阻断后续调用
+            if (conv == null) { working = false; syncSendBtn(); return; }
             if (meta[0] > 0 && meta[1] > 0) {
                 placeholder.evalTokens = meta[0];
                 placeholder.tps = meta[0] / (meta[1] / 1e9);
@@ -1778,10 +1779,12 @@ public class ChatPage extends Page {
                         scrollBottom();
                         pushNotice("模型未返回有效内容，已达重试上限，已忽略空回复");
                         working = false;  // 空回复重试达上限 → 回合结束，按钮恢复发送
+                        syncSendBtn();
                     }
                 } else {
                     retryCount = 0;
                     working = false;  // 本回合（含工具循环/续写/重试）全部结束 → 按钮恢复发送
+                    syncSendBtn();
                     if (Prefs.get(act).autoTitle() && conv != null
                             && !streaming && needsTitle()) {
                         autoTitle();
@@ -1969,8 +1972,8 @@ public class ChatPage extends Page {
             Ui.H.removeCallbacks(streamHeartbeat);
             streaming = false;
             busyUi(false);
-            if (paused) { retryRun = null; return; }  // 已暂停：不再安排自动重试
-            if (conv == null) { working = false; return; }
+            if (paused) { retryRun = null; working = false; syncSendBtn(); return; }  // 已暂停：不再安排自动重试
+            if (conv == null) { working = false; syncSendBtn(); return; }
             String raw = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
             String low = raw.toLowerCase(Locale.US);
             boolean networkErr = retryable(raw);
@@ -2003,6 +2006,7 @@ public class ChatPage extends Page {
                 }
             }
             working = false;  // 最终失败：工作循环结束，按钮恢复发送
+            syncSendBtn();
             pushNotice("请求失败：" + raw);
             ConvStore.save(act, conv);
             refreshViews();
@@ -2107,6 +2111,7 @@ public class ChatPage extends Page {
                         toolRunning = false;
                         working = false;
                         busyUi(false);
+                        syncSendBtn();
                         syncAgent(false);
                         updateLastNotice("已暂停，剩余工具调用已取消");
                     });
@@ -2168,11 +2173,13 @@ public class ChatPage extends Page {
                             // 已暂停：不再发起后续模型调用
                             working = false;
                             busyUi(false);
+                            syncSendBtn();
                             syncAgent(false);
                         } else if (taskDone[0]) {
                             pushNotice("任务完成：" + taskSummary[0]);
                             working = false;
                             busyUi(false);
+                            syncSendBtn();
                             syncAgent(false);
                         } else {
                             runTurn();
@@ -2200,6 +2207,7 @@ public class ChatPage extends Page {
         toolRounds = 0;
         if (retryRun != null) { Ui.H.removeCallbacks(retryRun); retryRun = null; }
         retryCount = 0;
+        busyUi(true);
         runTurn();
     }
 
@@ -2215,6 +2223,7 @@ public class ChatPage extends Page {
         streaming = false;
         streamViews.clear();
         busyUi(false);
+        syncSendBtn();
         syncAgent(false);
     }
 
@@ -2234,6 +2243,7 @@ public class ChatPage extends Page {
         streamMsg = null;
         streamViews.clear();
         busyUi(false);
+        syncSendBtn();
         syncAgent(false);
     }
 
@@ -2250,14 +2260,23 @@ public class ChatPage extends Page {
         updateSendIcon(b);
     }
 
-    /** 发送按钮状态：圆形背景 + 居中矢量图标（帧布局 + CENTER 缩放，彻底避免基线偏移） */
-    private void updateSendIcon(boolean busy) {
+    /** 发送按钮状态单一来源：按当前「working/工具循环/流式」实时计算，杜绝快照竞态 */
+    private void syncSendBtn() {
         if (sendBtn == null) return;
-        boolean p = working;  // 工作循环全程显示暂停按钮（含工具/续写/重试间隙），回合结束恢复发送
+        boolean p = working || toolRunning || streaming;  // 任一活动 → 暂停态；全部结束 → 发送态
         ImageView ic = sendBtn.getChildCount() > 0 ? (ImageView) sendBtn.getChildAt(0) : null;
         if (ic != null) ic.setImageDrawable(Icon.v(act, p ? "stop" : "send", t.mixTextOn(t), p ? 18 : 20));
         GradientDrawable bg = Ui.round(p ? t.alpha(t.danger, 0.9f) : t.accent, Ui.dpi(act, 999));
         sendBtn.setBackground(Ui.ripple(bg, t.alpha(t.textPri, 0.3f)));
+    }
+
+    /** 发送按钮状态：圆形背景 + 居中矢量图标（帧布局 + CENTER 缩放，彻底避免基线偏移） */
+    private void updateSendIcon(boolean busy) {
+        if (busy) {
+            working = true;  // 进入忙态时保证 working 置位（工具/流式轮次）
+        }
+        // 收尾（busy=false）不在此清 working —— 由调用方在清完标志后调 syncSendBtn() 统一刷新
+        syncSendBtn();
     }
 
 
