@@ -2,7 +2,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/version-1.8.1-blue)](AndroidManifest.xml)
+[![Version](https://img.shields.io/badge/version-1.9.2-blue)](AndroidManifest.xml)
 [![官网](https://img.shields.io/badge/%E5%AE%98%E7%BD%91-anma50509--maker.github.io-gold)](https://anma50509-maker.github.io/)
 [![Platform](https://img.shields.io/badge/platform-Android%208.0%2B-green)](#)
 [![License](https://img.shields.io/badge/license-MIT-orange)](LICENSE)
@@ -30,12 +30,15 @@
 - 🔊 **语音合成（TTS）**：Edge 免费 / HTTP API 双通道，自动朗读回复
 - 🎨 **扁平矢量图标**：统一替换 emoji，Material Design 风格，随主题着色
 - 🛠 **内置工作台**：代码编辑、终端、浏览器、会话管理一应俱全
+- 🎚 **模型档位**：预设「速度 / 平衡 / 质量」+ 自定义档位，一键切换模型与采样参数组合
+- 🧮 **提示词 Token 预算**：按对话动态裁剪上下文，控制成本同时保留关键信息
+- 💭 **思考链开关**：可强制开启/关闭模型推理过程，并按需回传精简思考
 - 💾 **会话持久化**：多模型消息序列化存储，随时续聊
 
 ## 📦 版本信息
 
-- versionName: **1.8.1**
-- versionCode: **23**
+- versionName: **1.9.2**
+- versionCode: **26**
 - minSdk: **26** (Android 8.0) · targetSdk: **35**
 
 ## 🏗 架构速览
@@ -95,7 +98,7 @@ zip 打包对齐 → apksigner 签名验证。产物输出为 `Ollamaster.apk`�
 
 ```
 source/
-├── src/                  # Java 源码（com.ollamaster 包，36 个文件）
+├── src/                  # Java 源码（com.ollamaster 包，39 个文件）
 ├── res/                  # Android 资源
 ├── docs/                 # 设计文档
 ├── AndroidManifest.xml   # 应用清单
