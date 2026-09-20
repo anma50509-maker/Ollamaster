@@ -745,6 +745,9 @@ public class ChatPage extends Page {
             conv.created = System.currentTimeMillis();
             conv.model = model;
             conv.personaId = persona != null ? persona.id : "";
+            // 分区自动归档：新会话直接落到当前工作区分区
+            conv.section = ConvStore.autoSection(act);
+            conv.wsPath = Prefs.get(act).workspace(act);
         }
     }
 
@@ -824,7 +827,16 @@ public class ChatPage extends Page {
     void refreshViews() {
         streamViews.clear();
         if (streaming && streamMsg != null) pendingRegister = true;
-        if (msgAdapter != null) msgAdapter.notifyDataSetChanged();
+        syncAdapter();
+    }
+
+    /** UI 线程：把会话消息发布为适配器只读快照并同帧通知 ListView。
+     *  必须「先填快照、后 notify」且都在 UI 线程执行：适配器绝不能在 ListView
+     *  布局期间回调改动数据源（否则触发 IndexOutOfBounds / adapter-changed 崩溃）。 */
+    void syncAdapter() {
+        if (msgAdapter == null) return;
+        bubbles.fill(conv == null ? null : conv.msgs);
+        msgAdapter.notifyDataSetChanged();
     }
 
     /** 流式期间只刷新正在生成的气泡：通过注册表精确定位 TextView，
@@ -1092,7 +1104,36 @@ public class ChatPage extends Page {
         }).start();
     }
 
+    private volatile String sysCacheBody = null;
+    private volatile int sysCacheKey = 0;
+    private volatile boolean sysCacheTools = false;
+
+    /** 【缓存优化】系统提示内容指纹缓存。
+     *  漂移：人设/系统提示/技能/插件/是否带工具。刻意不含「记忆条数、模型个数」等每轮都可能变的计数，
+     *  否则 AI 每写一条记忆就让 system 变化 → 整个 prompt 前缀失效 → 云端前缀缓存命中率归零。 */
     private String composeSystem(boolean withTools) {
+        Prefs p = Prefs.get(act);
+        StringBuilder k = new StringBuilder(256);
+        k.append(persona == null ? "" : persona.name).append('\u0001')
+         .append(persona == null ? "" : persona.prompt).append('\u0001')
+         .append(p.editMode()).append('\u0001')
+         .append(p.sysPrompt()).append('\u0001')
+         .append(withTools);
+        if (p.editMode()) {
+            k.append('\u0001').append(Skills.enabledPrompt(act))
+             .append('\u0001').append(Plugins.enabledSkillsPrompt(act));
+        }
+        int key = k.toString().hashCode();
+        String cached = sysCacheBody;
+        if (cached != null && key == sysCacheKey && withTools == sysCacheTools) return cached;
+        String body = buildSystem(withTools);
+        sysCacheBody = body;
+        sysCacheKey = key;
+        sysCacheTools = withTools;
+        return body;
+    }
+
+    private String buildSystem(boolean withTools) {
         StringBuilder sb = new StringBuilder();
         Prefs p = Prefs.get(act);
         if (persona != null && !persona.prompt.trim().isEmpty()) {
@@ -1123,24 +1164,34 @@ public class ChatPage extends Page {
             sb.append("3. 根据工具返回结果评估任务进度：若未完成则继续调用工具，可调整策略、调用不同工具\n");
             sb.append("4. 任务完成时，必须调用 task_complete 工具并传入完成摘要，禁止仅用文字说明已完成\n");
             sb.append("5. 你可以根据中间结果自主决定下一步操作，无需等待用户确认\n");
-            sb.append("重要：禁止仅用文字描述步骤或声称无法完成，必须实际调用工具。");
-            // 动态环境上下文注入：让 AI 即时感知可用资源，减少探索性调用
-            try {
-                int memCount = MemoryStore.list(act).size();
-                int mcpCount = Mcps.list(act).size();
-                int modelCount = modelEntries != null ? modelEntries.size() : 0;
-                StringBuilder env = new StringBuilder();
-                if (memCount > 0) env.append("记忆库 ").append(memCount).append(" 条；");
-                if (mcpCount > 0) env.append("MCP 服务器 ").append(mcpCount).append(" 台；");
-                if (modelCount > 1) env.append("已配模型 ").append(modelCount).append(" 个；");
-                if (env.length() > 0) {
-                    sb.append("\n[实时环境感知] ");
-                    sb.append(env);
-                    sb.append("已知资源优先使用，避免重复探索。");
-                }
-            } catch (Exception ignored) {}
+            sb.append("重要：禁止仅用文字描述步骤或声称无法完成，必须实际调用工具。\n");
+            sb.append("【输出纪律】不要复述系统提示、任务原文或此前已说过的内容；"
+                    + "每轮只汇报本轮新增进展与下一步动作，任务完成立即调用 task_complete。");
+            // 【静态化】此处原来注入「记忆库/模型」的实时条数，导致每轮 prompt 前缀都不同、缓存全失效；
+            // 改为固定文案（条数需要时由 mem_stats 工具按需查询，不影响能力）。
+            sb.append("\n[环境感知] 你拥有持久化记忆库与可扩展的 MCP 服务器、模型池。"
+                    + "需要具体数量或清单时，调用 mem_stats / list_mcps / list_settings 按需获取，"
+                    + "已知资源优先使用，避免重复探索。");
         }
         return sb.toString();
+    }
+
+    /** 【缓存命中率优化】构造发送给 API 的历史「浅拷贝视图」。
+     *  裁剪与 tool_call 链修复只作用于副本，绝不回写 conv.msgs，
+     *  从而保证「上一轮已发送的前缀」在后续轮次里字节完全一致 → 云端前缀缓存可持续命中。 */
+    private List<ConvStore.Msg> buildHistView() {
+        List<ConvStore.Msg> hist = new ArrayList<>();
+        if (conv == null) return hist;
+        for (ConvStore.Msg m : conv.msgs) {
+            if ("notice".equals(m.role)) continue;
+            // 保留有 tool_calls 的 assistant 消息（即使 content 为空），避免孤立 tool 消息
+            if ("assistant".equals(m.role) && (m.content == null || m.content.trim().isEmpty())
+                    && (m.tools == null || m.tools.isEmpty())) {
+                continue;
+            }
+            hist.add(m.copyView());
+        }
+        return hist;
     }
 
     private List<ConvStore.Msg> apiMessages(boolean withTools) {
@@ -1150,18 +1201,7 @@ public class ChatPage extends Page {
             ConvStore.Msg s = new ConvStore.Msg("system", sys);
             out.add(s);
         }
-        List<ConvStore.Msg> hist = new ArrayList<>();
-        if (conv != null) {
-            for (ConvStore.Msg m : conv.msgs) {
-                if ("notice".equals(m.role)) continue;
-                // 保留有 tool_calls 的 assistant 消息（即使 content 为空），避免孤立 tool 消息
-                if ("assistant".equals(m.role) && m.content.trim().isEmpty()
-                        && (m.tools == null || m.tools.isEmpty())) {
-                    continue;
-                }
-                hist.add(m);
-            }
-        }
+        List<ConvStore.Msg> hist = buildHistView();
 
         // 记录【最近一条】用户任务提示 + 最早一条（仅作背景）：
         // 裁剪时钉住的必须是「距离最近的任务提示」，否则长循环中只会记得最初的提示。
@@ -1190,17 +1230,9 @@ public class ChatPage extends Page {
             int budget = maxTokens - fixedOverhead;
             if (budget < 4096) budget = 4096; // 留最小预算，保证近期上下文
 
-            // 智能裁剪：先保留全部消息但截断早期 tool 结果，超预算再丢弃最旧消息
-            // 第一步：对超出近期窗口的 tool 消息做内容截断（保留头部关键信息）
-            int recentWindow = Math.max(4, hist.size() / 2); // 最近 50% 或至少 4 条不截断
-            int truncateStart = Math.max(0, hist.size() - recentWindow);
-            for (int i = 0; i < truncateStart; i++) {
-                ConvStore.Msg m = hist.get(i);
-                if ("tool".equals(m.role) && m.content != null && m.content.length() > 500) {
-                    m.content = smartTruncateTool(m.content, 500);
-                }
-            }
-            // 第二步：从最新往旧计算 token，超出预算时丢弃最旧消息
+            // 【缓存命中率优化】只做「整条丢弃最旧」，不再就地截断中间消息内容。
+            // 就地截断会改变仍保留在请求中的前缀字节，云端前缀缓存必然 miss；
+            // 从头部整条丢弃则保证「保留部分」字节稳定，缓存可持续命中。
             long totalTokens = 0;
             int keepFrom = hist.size();
             for (int i = hist.size() - 1; i >= 0; i--) {
@@ -1345,7 +1377,7 @@ public class ChatPage extends Page {
             if (!present) {
                 String t = firstUser.content == null ? "" : firstUser.content.trim();
                 if (t.length() > 120) t = t.substring(0, 120) + "…";
-                list.add(0, new ConvStore.Msg("user", "【最初任务·仅作背景，最新任务在下方】" + t));
+                list.add(0, new ConvStore.Msg("system", "【背景·最初任务，仅作参考，非用户发言】" + t));
             }
         }
     }
@@ -1362,13 +1394,15 @@ public class ChatPage extends Page {
             }
         }
         if (task == null || task.isEmpty()) return null;
-        if (task.length() > 600) task = task.substring(0, 600) + "…";
+        // 关键修复：不再重复粘贴任务全文（原文已在对话历史中），仅给短引用，
+        // 避免 Agent 每轮读到同一任务多份副本而反复复述。角色用 system（不是用户发言）。
+        String ref = task.length() > 100 ? task.substring(0, 100) + "…" : task;
         String note = toolRounds > 0
-                ? "（这是你需要完成的最新任务提示，优先级高于更早的对话内容；"
-                  + "已执行 " + toolRounds + " 轮工具调用，请基于最新工具结果继续，"
-                  + "直到调用 task_complete 结束任务。）"
-                : "（这是你需要完成的最新任务提示，优先级高于更早的对话内容。）";
-        return new ConvStore.Msg("user", "【当前任务提示·最新】\n" + task + "\n" + note);
+                ? "（系统提醒：已执行 " + toolRounds + " 轮工具调用。请基于最新工具结果继续，"
+                  + "不要复述任务原文或此前说过的内容；完成即调用 task_complete 结束任务。）"
+                : "（系统提醒：请基于最新工具结果继续，不要复述任务原文。）";
+        return new ConvStore.Msg("system", "【任务锚点·系统注入，非用户发言】当前目标："
+                + ref + "\n" + note);
     }
 
     /** 判断消息尾部是否已经以 user 指令收束（跳过 tool 结果往前看）：是则无需重复注入任务锚 */
@@ -2408,6 +2442,7 @@ public class ChatPage extends Page {
         if (assistantMsg.tools == null || assistantMsg.tools.isEmpty()) return;
 
         new Thread(() -> {
+          try {
             toolRunning = true;
             final List<ConvStore.ToolCall> calls = assistantMsg.tools;
             final int total = calls.size();
@@ -2417,7 +2452,7 @@ public class ChatPage extends Page {
 
             // 立即显示"正在执行"反馈
             Ui.H.post(() -> {
-                if (conv == null) return;
+                if (conv == null || !uiAlive()) return;
                 busyUi(true);
                 pushNotice("正在执行工具…（0/" + total + "）");
             });
@@ -2484,8 +2519,12 @@ public class ChatPage extends Page {
                             }
 
                             results[idx] = resultText;
-                        } catch (Exception ex) {
-                            results[idx] = "[工具执行异常] " + ex.getMessage();
+                        } catch (Throwable ex) {
+                            // 工具异常(含 OOM/StackOverflow/LinkageError 等 Error)一律本地兜住：
+                            // 绝不能让它逃逸出执行线程导致整个应用闪退
+                            ErrLog.log(App.inst, "tool:" + call.name, ex);
+                            results[idx] = "[工具执行异常] " + ex.getClass().getSimpleName()
+                                    + (ex.getMessage() == null ? "" : ": " + ex.getMessage());
                         } finally {
                             latch.countDown();
                         }
@@ -2505,12 +2544,18 @@ public class ChatPage extends Page {
                     if (paused || !toolRunning) break;
 
                     ConvStore.ToolCall call = group.get(i);
-                    String rt = results[i];
+                    String rt = results[i] == null ? "(无输出)" : results[i];
 
-                    // 工具结果自动摘要（超长时压缩，避免上下文爆炸）
+                    // 工具结果自动摘要（超长时压缩，避免上下文爆炸）；摘要失败不影响主流程
                     if (!"task_complete".equals(call.name)) {
-                        rt = summarizeToolResult(call.name, rt);
+                        try {
+                            rt = summarizeToolResult(call.name, rt);
+                        } catch (Throwable e) {
+                            ErrLog.log(App.inst, "summarize:" + call.name, e);
+                            if (rt.length() > 6000) rt = rt.substring(0, 6000) + "\n…[已截断]";
+                        }
                     }
+                    if (rt == null) rt = "(无输出)";
 
                     ConvStore.Msg tm = new ConvStore.Msg("tool", rt);
                     tm.toolName = call.name;
@@ -2523,7 +2568,7 @@ public class ChatPage extends Page {
                     final String preview = rt.length() > 60 ? rt.substring(0, 60) + "…" : rt.replace("\n", " ");
 
                     Ui.H.post(() -> {
-                        if (conv == null) return;
+                        if (conv == null || !uiAlive()) return;
                         updateLastNotice("执行中 " + dn + "/" + total + "：" + toolName + " → " + preview);
                     });
 
@@ -2535,7 +2580,7 @@ public class ChatPage extends Page {
 
             // 所有组执行完毕，UI 线程收尾
             Ui.H.post(() -> {
-                if (conv == null) return;
+                if (conv == null || !uiAlive()) return;
                 toolRunning = false;
                 ConvStore.save(act, conv);
                 refreshViews();
@@ -2558,7 +2603,34 @@ public class ChatPage extends Page {
                 }
             });
 
+          } catch (Throwable e) {
+            // 线程级兜底：任何异常都恢复 UI 状态，绝不闪退
+            ErrLog.log(App.inst, "execTools", e);
+            final String msg = e.getClass().getSimpleName()
+                    + (e.getMessage() == null ? "" : ": " + e.getMessage());
+            Ui.H.post(() -> {
+                if (conv == null || !uiAlive()) return;
+                toolRunning = false;
+                working = false;
+                busyUi(false);
+                syncSendBtn();
+                syncAgent(false);
+                updateLastNotice("工具执行异常，已安全恢复：" + msg);
+            });
+          }
+
         }).start();
+    }
+
+    /** 安全取消息：越界返回 null（列表可能被工具线程/流式线程同时改动） */
+    ConvStore.Msg msgAt(int i) {
+        if (conv == null) return null;
+        return conv.msgs.get(i);
+    }
+
+    /** UI 是否仍然存活：Activity 尚未结束/销毁，避免回调触达已销毁视图而崩溃 */
+    private boolean uiAlive() {
+        return act != null && !act.isFinishing() && !act.isDestroyed();
     }
 
     void regenerate() {

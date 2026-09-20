@@ -3,6 +3,8 @@ package com.ollamaster;
 import android.annotation.SuppressLint;
 import android.app.Dialog;
 import android.graphics.Color;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.text.method.LinkMovementMethod;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -10,6 +12,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.BaseAdapter;
 import android.widget.EditText;
+import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.ScrollView;
@@ -664,67 +667,130 @@ class ChatDialogs {
         LinearLayout box = new LinearLayout(act);
         box.setOrientation(LinearLayout.VERTICAL);
         box.addView(Ui.title(act, t, "历史会话"));
+        box.addView(Ui.gap(act, 4));
+
+        final List<ConvStore.Conv> all = new ArrayList<>();      // 全量
+        final List<ConvStore.Conv> shown = new ArrayList<>();    // 过滤结果
+        final String[] kw = {""};        // 搜索关键词
+        final String[] sec = {"全部"};    // 当前分区
+        final String[] tag = {""};       // 当前标签（空=全部）
+
+        // 顶栏：统计 + 按工作区归档 + 清空全部
+        LinearLayout topBar = new LinearLayout(act);
+        topBar.setOrientation(LinearLayout.HORIZONTAL);
+        topBar.setGravity(Gravity.CENTER_VERTICAL);
+        final TextView cntTip = Ui.caption(act, t, "加载中…");
+        cntTip.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        topBar.addView(cntTip);
+        TextView rearchBtn = Ui.btnGhost(act, t, "按工作区归档");
+        LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        rlp.leftMargin = Ui.dpi(act, 8);
+        topBar.addView(rearchBtn, rlp);
+        final TextView clearAllBtn = Ui.btnGhost(act, t, "清空全部");
+        clearAllBtn.setTextColor(t.alpha(t.danger, 0.95f));
+        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        clp.leftMargin = Ui.dpi(act, 8);
+        topBar.addView(clearAllBtn, clp);
+        box.addView(topBar);
+        box.addView(Ui.gap(act, 10));
+
+        // 搜索框（标题 / 标签 / 分区 / 模型 关键词检索）：圆角、两端留白与下方列表对齐
+        final EditText search = Ui.search(act, t, "搜索：标题 / 标签 / 分区 / 模型");
+        box.addView(search, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         box.addView(Ui.gap(act, 8));
 
-        final List<ConvStore.Conv> all = new ArrayList<>();
-        final TextView emptyTip = Ui.caption(act, t, "加载中…");
+        // 分区过滤条：左侧固定标签 + 右侧横滚 chips（两行文字基线对齐一致）
+        LinearLayout secLine = new LinearLayout(act);
+        secLine.setOrientation(LinearLayout.HORIZONTAL);
+        secLine.setGravity(Gravity.CENTER_VERTICAL);
+        secLine.addView(Ui.stripLabel(act, t, "分区"));
+        HorizontalScrollView secScroll = new HorizontalScrollView(act);
+        secScroll.setHorizontalScrollBarEnabled(false);
+        final LinearLayout secRow = Ui.chipStrip(act);
+        secScroll.addView(secRow);
+        secLine.addView(secScroll, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        box.addView(secLine);
+
+        // 标签过滤条：同结构，与分区条左端严格对齐
+        LinearLayout tagLine = new LinearLayout(act);
+        tagLine.setOrientation(LinearLayout.HORIZONTAL);
+        tagLine.setGravity(Gravity.CENTER_VERTICAL);
+        tagLine.addView(Ui.stripLabel(act, t, "标签"));
+        HorizontalScrollView tagScroll = new HorizontalScrollView(act);
+        tagScroll.setHorizontalScrollBarEnabled(false);
+        final LinearLayout tagRow = Ui.chipStrip(act);
+        tagScroll.addView(tagRow);
+        tagLine.addView(tagScroll, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        box.addView(tagLine);
+        box.addView(Ui.gap(act, 2));
+        box.addView(Ui.hairline(act, t));
+        box.addView(Ui.gap(act, 4));
+
+        final TextView emptyTip = Ui.caption(act, t, "");
+        emptyTip.setGravity(Gravity.CENTER);
+        emptyTip.setPadding(0, Ui.dpi(act, 10), 0, Ui.dpi(act, 10));
         box.addView(emptyTip);
+
         ListView lv = new ListView(act);
-        lv.setDivider(null);
+        lv.setDivider(new android.graphics.drawable.ColorDrawable(t.alpha(t.textPri, 0.06f)));
+        lv.setDividerHeight(Math.max(1, Ui.dpi(act, 0.7f)));
+        lv.setSelector(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
+        lv.setVerticalScrollBarEnabled(false);
         final BaseAdapter ad = new BaseAdapter() {
-            @Override public int getCount() { return all.size(); }
-            @Override public Object getItem(int i) { return all.get(i); }
+            @Override public int getCount() { return shown.size(); }
+            @Override public Object getItem(int i) { return shown.get(i); }
             @Override public long getItemId(int i) { return i; }
             @SuppressLint("SetTextI18n")
             @Override public View getView(int i, View cv, ViewGroup parent) {
-                final ConvStore.Conv c = all.get(i);
-                LinearLayout row = cv instanceof LinearLayout ? (LinearLayout) cv : Ui.row(act, t);
-                if (row.getChildCount() == 0) {
-                    LinearLayout midCol = new LinearLayout(act);
-                    midCol.setOrientation(LinearLayout.VERTICAL);
-                    midCol.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-                    row.addView(midCol);
-                    TextView del = new TextView(act);
-                    row.addView(del);
-                    TextView delBtn = new TextView(act);
-                    row.addView(delBtn);
-                }
-                LinearLayout midCol = (LinearLayout) row.getChildAt(0);
-                while (midCol.getChildCount() < 2) {
-                    TextView a = new TextView(act);
-                    TextView b = new TextView(act);
-                    midCol.addView(a);
-                    midCol.addView(b);
-                }
-                TextView title = (TextView) midCol.getChildAt(0);
-                title.setText(c.title);
+                final ConvStore.Conv c = shown.get(i);
+                LinearLayout row = Ui.row(act, t);
+                LinearLayout midCol = new LinearLayout(act);
+                midCol.setOrientation(LinearLayout.VERTICAL);
+                midCol.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+                TextView title = new TextView(act);
+                title.setText(c.title + (c.archived ? "  [已归档]" : ""));
                 title.setTextColor(c.id.equals(cp.conv == null ? "" : cp.conv.id) ? t.accent : t.textPri);
                 title.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 13.5f));
-                TextView sub = (TextView) midCol.getChildAt(1);
+                title.setSingleLine(true);
+                title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                midCol.addView(title);
+
+                TextView sub = new TextView(act);
                 java.text.SimpleDateFormat df = new java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.getDefault());
-                sub.setText(df.format(new java.util.Date(c.updated)) + " · " + (c.msgCount >= 0 ? c.msgCount : "?") + " 条" +
-                        (c.model.isEmpty() ? "" : " · " + c.model));
+                String sc = c.section == null || c.section.isEmpty() ? "默认工作区" : c.section;
+                sub.setText(df.format(new java.util.Date(c.updated)) + " · " + (c.msgCount >= 0 ? c.msgCount : "?") + " 条"
+                        + " · " + sc + (c.model.isEmpty() ? "" : " · " + c.model));
                 sub.setTextColor(t.textSec);
                 sub.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 11));
-                TextView del = (TextView) row.getChildAt(1);
-                del.setText("重命名");
-                del.setTextColor(t.accent);
-                del.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 12));
-                del.setPadding(Ui.dpi(act, 4), 0, Ui.dpi(act, 4), 0);
-                del.setOnClickListener(v -> renameConvDialog(c, lv, all));
-                TextView delBtn = (TextView) row.getChildAt(2);
-                delBtn.setText("删除");
-                delBtn.setTextColor(t.alpha(t.danger, 0.9f));
-                delBtn.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 12));
-                delBtn.setPadding(Ui.dpi(act, 4), 0, 0, 0);
-                delBtn.setOnClickListener(v -> {
-                    ConvStore.delete(act, c.id);
-                    if (cp.conv != null && cp.conv.id.equals(c.id)) cp.conv = null;
-                    cp.refreshViews();
-                    cp.refreshEmpty();
-                    hd.dismiss();
-                    Ui.toast(act, "已删除");
-                });
+                sub.setSingleLine(true);
+                sub.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                midCol.addView(sub);
+
+                String tl = c.tagLine();
+                if (!tl.isEmpty()) {
+                    TextView tg = new TextView(act);
+                    tg.setText(tl);
+                    tg.setTextColor(t.accent);
+                    tg.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 10.5f));
+                    tg.setSingleLine(true);
+                    midCol.addView(tg);
+                }
+                row.addView(midCol);
+
+                TextView more = new TextView(act);
+                more.setText("⋯");
+                more.setTextColor(t.accent);
+                more.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 16));
+                more.setGravity(Gravity.CENTER);
+                more.setBackground(Ui.ripple(Ui.round(Color.TRANSPARENT, Ui.dpi(act, 999)), t.alpha(t.accent, 0.14f)));
+                LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(Ui.dpi(act, 34), Ui.dpi(act, 34));
+                mlp.leftMargin = Ui.dpi(act, 6);
+                row.addView(more, mlp);
+
+                more.setOnClickListener(v -> convActions(c));
                 row.setOnClickListener(v -> {
                     ConvStore.Conv loaded = ConvStore.load(act, c.id);
                     if (loaded != null) cp.loadConv(loaded);
@@ -734,20 +800,279 @@ class ChatDialogs {
             }
         };
         lv.setAdapter(ad);
-        box.addView(lv, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dpi(act, 360)));
+        box.addView(lv, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dpi(act, 330)));
+
+        // ---- 过滤与重绘（统一入口，所有交互都调用它） ----
+        final Runnable[] refreshRef = new Runnable[1];
+        Runnable refresh = new Runnable() {
+            @Override public void run() {
+                // 分区 chips
+                secRow.removeAllViews();
+                final List<String> secs = ConvStore.sectionsOf(all);
+                List<String> secNames = new ArrayList<>();
+                secNames.add("全部");
+                secNames.addAll(secs);
+                if (!secNames.contains("已归档")) secNames.add("已归档");
+                for (final String s : secNames) {
+                    TextView chip = Ui.chipInto(act, t, secRow, s, s.equals(sec[0]));
+                    chip.setOnClickListener(v -> { sec[0] = s; refreshRef[0].run(); });
+                }
+                // 标签 chips
+                tagRow.removeAllViews();
+                TextView allTag = Ui.chipInto(act, t, tagRow, "全部标签", tag[0].isEmpty());
+                allTag.setOnClickListener(v -> { tag[0] = ""; refreshRef[0].run(); });
+                for (final String s : ConvStore.tagsOf(all)) {
+                    TextView chip = Ui.chipInto(act, t, tagRow, "#" + s, s.equalsIgnoreCase(tag[0]));
+                    chip.setOnClickListener(v -> { tag[0] = s; refreshRef[0].run(); });
+                }
+                // 过滤
+                shown.clear();
+                for (ConvStore.Conv v : all) {
+                    if (!"全部".equals(sec[0])) {
+                        if ("已归档".equals(sec[0])) { if (!v.archived) continue; }
+                        else {
+                            String s = v.section == null || v.section.isEmpty() ? "默认工作区" : v.section;
+                            if (!s.equals(sec[0])) continue;
+                        }
+                    }
+                    if (!tag[0].isEmpty() && !v.hasTag(tag[0])) continue;
+                    if (!ConvStore.matches(v, kw[0])) continue;
+                    shown.add(v);
+                }
+                int[] st = ConvStore.stats(all);
+                cntTip.setText("共 " + st[0] + " 个 · 归档 " + st[1] + " · 分区 " + st[2] + " · 标签 " + st[3]);
+                boolean filtered = !kw[0].isEmpty() || !"全部".equals(sec[0]) || !tag[0].isEmpty();
+                emptyTip.setText(filtered ? "无匹配结果（共 " + shown.size() + " 条）" : "暂无历史会话");
+                emptyTip.setVisibility(shown.isEmpty() ? View.VISIBLE : View.GONE);
+                ad.notifyDataSetChanged();
+            }
+        };
+        refreshRef[0] = refresh;
+
+        // 搜索框实时过滤
+        search.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
+            @Override public void onTextChanged(CharSequence s, int a, int b, int c) {}
+            @Override public void afterTextChanged(Editable e) {
+                kw[0] = e == null ? "" : e.toString();
+                refreshRef[0].run();
+            }
+        });
+
+        // 按工作区重新归档：把未归档会话分区重置为当前工作区名
+        rearchBtn.setOnClickListener(v -> {
+            final String secName = ConvStore.autoSection(act);
+            int n = 0;
+            for (ConvStore.Conv c : new ArrayList<>(all)) {
+                if (c.archived) continue;
+                c.section = secName;
+                c.wsPath = Prefs.get(act).workspace(act);
+                if (ConvStore.patch(act, c.id, secName, null, null)) n++;
+            }
+            refreshRef[0].run();
+            Ui.toast(act, "已按工作区归档到「" + secName + "」（" + n + " 个）");
+        });
+
+        clearAllBtn.setOnClickListener(v -> confirmClearAll(all, ad, emptyTip, refreshRef));
 
         hd = Ui.sheet(act, box, t);
         hd.show();
-        // 独立线程加载历史列表；flush 为无死锁实现，等待有界，不会再卡住“加载中…”
+        // 独立线程加载历史列表（flush 无死锁、等待有界）
         new Thread(() -> {
             ConvStore.flush(1500);
             final List<ConvStore.Conv> got = ConvStore.listMeta(act);
+            // 加载即自动归档：旧数据按当前工作区补全分区
+            for (ConvStore.Conv c : got) {
+                if (c.section == null || c.section.isEmpty()) {
+                    c.section = ConvStore.autoSection(act);
+                    c.wsPath = Prefs.get(act).workspace(act);
+                    ConvStore.patch(act, c.id, c.section, null, null);
+                }
+            }
             Ui.H.post(() -> {
                 all.addAll(got);
-                emptyTip.setText("暂无历史会话");
-                emptyTip.setVisibility(all.isEmpty() ? View.VISIBLE : View.GONE);
-                ad.notifyDataSetChanged();
+                refreshRef[0].run();
             });
         }, "om-history").start();
+    }
+
+    /** 单个会话的操作面板：重命名 / 标签 / 归档 / 删除 */
+    private void convActions(final ConvStore.Conv c) {
+        t = Theme.of(act);
+        LinearLayout box = new LinearLayout(act);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.addView(Ui.title(act, t, c.title));
+        box.addView(Ui.gap(act, 4));
+        String sc = c.section == null || c.section.isEmpty() ? "默认工作区" : c.section;
+        box.addView(Ui.caption(act, t, "分区：" + sc + (c.archived ? " · 已归档" : "")
+                + (c.tagLine().isEmpty() ? "" : " · " + c.tagLine())));
+        box.addView(Ui.gap(act, 10));
+        final Dialog[] w = new Dialog[1];
+        box.addView(Ui.gap(act, 4));
+        TextView rename = Ui.menuItem(act, t, "重命名", false);
+        TextView tagsBtn = Ui.menuItem(act, t, "编辑标签", false);
+        TextView archBtn = Ui.menuItem(act, t, c.archived ? "移出归档" : "归档", false);
+        TextView delBtn = Ui.menuItem(act, t, "删除", true);
+        box.addView(rename);
+        box.addView(tagsBtn);
+        box.addView(archBtn);
+        box.addView(Ui.gap(act, 6));
+        box.addView(Ui.hairline(act, t));
+        box.addView(Ui.gap(act, 6));
+        box.addView(delBtn);
+        w[0] = Ui.sheet(act, box, t);
+        w[0].show();
+
+        rename.setOnClickListener(v -> { w[0].dismiss(); if (hd != null) hd.dismiss(); historySheet(); renameDialogFor(c); });
+        tagsBtn.setOnClickListener(v -> { w[0].dismiss(); tagEditDialog(c); });
+        archBtn.setOnClickListener(v -> {
+            ConvStore.setArchived(act, c, !c.archived);
+            w[0].dismiss();
+            if (hd != null) hd.dismiss();
+            historySheet();
+            Ui.toast(act, c.archived ? "已归档" : "已移出归档");
+        });
+        delBtn.setOnClickListener(v -> {
+            ConvStore.delete(act, c.id);
+            if (cp.conv != null && cp.conv.id.equals(c.id)) cp.conv = null;
+            cp.refreshViews();
+            cp.refreshEmpty();
+            w[0].dismiss();
+            if (hd != null) hd.dismiss();
+            historySheet();
+            Ui.toast(act, "已删除");
+        });
+    }
+
+    /** 会话重命名（左对齐输入 + 等高按钮行，与面板内边距一致） */
+    private void renameDialogFor(final ConvStore.Conv c) {
+        t = Theme.of(act);
+        LinearLayout box = new LinearLayout(act);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.addView(Ui.title(act, t, "重命名会话"));
+        box.addView(Ui.gap(act, 10));
+        final EditText et = Ui.search(act, t, "输入会话名称");
+        et.setSingleLine(true);
+        et.setText(c.title);
+        et.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 14));
+        box.addView(et, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        box.addView(Ui.gap(act, 16));
+        TextView cancel = Ui.btnGhost(act, t, "取消");
+        TextView ok = Ui.btnPrimary(act, t, "保存");
+        final Dialog[] w = new Dialog[1];
+        cancel.setOnClickListener(v -> w[0].dismiss());
+        ok.setOnClickListener(v -> {
+            String name = et.getText() == null ? "" : et.getText().toString().trim();
+            if (name.isEmpty()) { Ui.toast(act, "名称不能为空"); return; }
+            if (name.length() > 18) name = name.substring(0, 17) + "…";
+            c.title = name;
+            ConvStore.Conv full = ConvStore.load(act, c.id);
+            if (full != null) { full.title = name; ConvStore.save(act, full); }
+            if (cp.conv != null && cp.conv.id.equals(c.id)) { cp.conv.title = name; ConvStore.save(act, cp.conv); }
+            w[0].dismiss();
+            if (hd != null) hd.dismiss();
+            historySheet();
+            Ui.toast(act, "已重命名为：" + name);
+        });
+        box.addView(Ui.actionRow(act, t, cancel, ok));
+        w[0] = Ui.sheet(act, box, t);
+        w[0].show();
+    }
+
+    /** 标签编辑：逗号/空格分隔，自动去重（用 # 前缀 chips 预览，对齐一致） */
+    private void tagEditDialog(final ConvStore.Conv c) {
+        t = Theme.of(act);
+        LinearLayout box = new LinearLayout(act);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.addView(Ui.title(act, t, "编辑标签"));
+        box.addView(Ui.gap(act, 6));
+        box.addView(Ui.caption(act, t, "多个标签用逗号或空格分隔，最多 12 个"));
+        box.addView(Ui.gap(act, 10));
+        final EditText et = Ui.search(act, t, "例如：工作, 灵感, 待办");
+        et.setSingleLine(true);
+        et.setText(c.tags == null ? "" : android.text.TextUtils.join(", ", c.tags));
+        et.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 14));
+        box.addView(et, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        // 实时预览 chips：输入即可看到规范化后的标签，左端与输入框对齐
+        final LinearLayout preview = Ui.chipStrip(act);
+        HorizontalScrollView pvScroll = new HorizontalScrollView(act);
+        pvScroll.setHorizontalScrollBarEnabled(false);
+        pvScroll.addView(preview);
+        box.addView(Ui.gap(act, 10));
+        box.addView(pvScroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        final Runnable[] pv = new Runnable[1];
+        pv[0] = () -> {
+            preview.removeAllViews();
+            List<String> list = ConvStore.parseTags(et.getText() == null ? "" : et.getText().toString());
+            for (String s : list) Ui.chipInto(act, t, preview, "#" + s, true);
+        };
+        et.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int a, int b, int d) {}
+            @Override public void onTextChanged(CharSequence s, int a, int b, int d) {}
+            @Override public void afterTextChanged(Editable e) { pv[0].run(); }
+        });
+        pv[0].run();
+
+        box.addView(Ui.gap(act, 16));
+        TextView cancel = Ui.btnGhost(act, t, "取消");
+        TextView ok = Ui.btnPrimary(act, t, "保存标签");
+        final Dialog[] w = new Dialog[1];
+        cancel.setOnClickListener(v -> w[0].dismiss());
+        ok.setOnClickListener(v -> {
+            List<String> list = ConvStore.parseTags(et.getText() == null ? "" : et.getText().toString());
+            ConvStore.setTags(act, c, list);
+            w[0].dismiss();
+            if (hd != null) hd.dismiss();
+            historySheet();
+            Ui.toast(act, list.isEmpty() ? "已清空标签" : "已保存 " + list.size() + " 个标签");
+        });
+        box.addView(Ui.actionRow(act, t, cancel, ok));
+        w[0] = Ui.sheet(act, box, t);
+        w[0].show();
+    }
+
+    /** 清空全部历史：二次确认后删除所有会话文件，并同步界面状态。 */
+    private void confirmClearAll(final List<ConvStore.Conv> all, final BaseAdapter ad, final TextView emptyTip, final Runnable[] refreshRef) {
+        t = Theme.of(act);
+        final int n = all.size();
+        if (n == 0) {
+            Ui.toast(act, "暂无历史会话");
+            return;
+        }
+        LinearLayout box = new LinearLayout(act);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.addView(Ui.title(act, t, "清空全部历史"));
+        box.addView(Ui.gap(act, 6));
+        box.addView(Ui.caption(act, t, "将永久删除本机全部 " + n + " 个会话，此操作不可撤销"));
+        box.addView(Ui.gap(act, 12));
+        LinearLayout btns = new LinearLayout(act);
+        btns.setOrientation(LinearLayout.HORIZONTAL);
+        TextView cancel = Ui.btnGhost(act, t, "取消");
+        TextView ok = Ui.btnPrimary(act, t, "确认清空");
+        ok.setTextColor(t.alpha(t.danger, 0.95f));
+        final Dialog[] w = new Dialog[1];
+        cancel.setOnClickListener(v -> w[0].dismiss());
+        ok.setOnClickListener(v -> {
+            final int deleted = ConvStore.deleteAll(act);
+            all.clear();
+            if (cp.conv != null) cp.conv = null;
+            cp.refreshViews();
+            cp.refreshEmpty();
+            ad.notifyDataSetChanged();
+            emptyTip.setText("暂无历史会话");
+            emptyTip.setVisibility(View.VISIBLE);
+            if (refreshRef != null && refreshRef[0] != null) refreshRef[0].run();
+            w[0].dismiss();
+            if (hd != null) hd.dismiss();
+            Ui.toast(act, "已清空全部历史（" + deleted + " 个）");
+        });
+        LinearLayout.LayoutParams l1 = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        l1.rightMargin = Ui.dpi(act, 8);
+        btns.addView(cancel, l1);
+        btns.addView(ok, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        box.addView(btns);
+        w[0] = Ui.sheet(act, box, t);
+        w[0].show();
     }
 }

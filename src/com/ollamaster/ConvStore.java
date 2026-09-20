@@ -10,6 +10,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Iterator;
+import java.util.Collection;
 import java.util.Locale;
 
 public class ConvStore {
@@ -33,6 +35,26 @@ public class ConvStore {
         public String model;            // 该轮对话使用的模型名
 
         public Msg(String role, String content) { this.role = role; this.content = content; this.ts = System.currentTimeMillis(); }
+
+        /** 【缓存命中率优化】浅拷贝视图：供 apiMessages 构造请求副本。
+         *  裁剪与一致性修复只改副本，绝不回写原始历史，
+         *  保证「上一轮已发送给 API 的前缀」字节稳定，云端前缀缓存可复用。 */
+        public Msg copyView() {
+            Msg m = new Msg(role, content);
+            m.ts = ts;
+            if (tools != null && !tools.isEmpty()) m.tools = new ArrayList<>(tools);
+            m.toolName = toolName;
+            m.toolCallId = toolCallId;
+            if (attaches != null && !attaches.isEmpty()) m.attaches = new ArrayList<>(attaches);
+            m.tps = tps;
+            m.evalTokens = evalTokens;
+            m.reasoning = reasoning;
+            m.promptTokens = promptTokens;
+            m.cacheHitTokens = cacheHitTokens;
+            m.cacheMissTokens = cacheMissTokens;
+            m.model = model;
+            return m;
+        }
 
         /** 发送给 API 的内容：剥离思考链块，只回传正文 */
         private String apiContent() {
@@ -285,11 +307,35 @@ public class ConvStore {
     public static class Conv {
         public String id, title = "新对话", model = "", personaId = "";
         public long created, updated;
-        public List<Msg> msgs = new ArrayList<>();
+        public SyncList<Msg> msgs = new SyncList<>();
         public String summary = "";
         public int summaryCount = 0;
         /** 轻量列表用的消息条数（listMeta 填充，msgs 保持空，避免全量解析 OOM） */
         public transient int msgCount = 0;
+
+        // ===== 历史记录健壮机制新增元数据 =====
+        /** 标签集合（用于标签检索、过滤） */
+        public List<String> tags = new ArrayList<>();
+        /** 是否已归档（归档会话默认折叠在「已归档」分区） */
+        public boolean archived = false;
+        /** 所属分区：默认按工作区名自动归档 */
+        public String section = "";
+        /** 归档时记录的工作区路径（工作区变化时自动重新归档） */
+        public String wsPath = "";
+
+        /** 标签的展示串：#a #b */
+        public String tagLine() {
+            if (tags == null || tags.isEmpty()) return "";
+            StringBuilder sb = new StringBuilder();
+            for (String s : tags) sb.append("#").append(s).append(" ");
+            return sb.toString().trim();
+        }
+
+        public boolean hasTag(String tag) {
+            if (tag == null || tag.isEmpty() || tags == null) return false;
+            for (String s : tags) if (tag.equalsIgnoreCase(s)) return true;
+            return false;
+        }
     }
 
     private static File dir(Context c) {
@@ -434,6 +480,154 @@ public class ConvStore {
         try { return Long.parseLong(s.trim()); } catch (Throwable t) { return System.currentTimeMillis(); }
     }
 
+    // ================= 历史记录健壮机制：分区 / 归档 / 标签 / 检索 =================
+
+    /** 默认分区名：当前工作区目录名（工作区变了分区随之变化，实现「按工作区自动归档」） */
+    public static String autoSection(Context c) {
+        try {
+            String ws = Prefs.get(c).workspace(c);
+            if (ws != null) {
+                File f = new File(ws);
+                String n = f.getName();
+                if (n != null && !n.trim().isEmpty()) return n.trim();
+            }
+        } catch (Throwable ignored) {}
+        return "默认工作区";
+    }
+
+    /** 旧数据补全分区与工作区：未设置分区的会话按当前工作区自动归档，实现历史自动分区 */
+    public static void autofillArchive(Context c, Conv v) {
+        try {
+            if (v.section == null || v.section.isEmpty()) v.section = autoSection(c);
+            if (v.wsPath == null || v.wsPath.isEmpty()) v.wsPath = Prefs.get(c).workspace(c);
+        } catch (Throwable ignored) {}
+    }
+
+    /** 把标签串（逗号/空格/井号分隔）规范化为去重列表 */
+    public static List<String> parseTags(String raw) {
+        List<String> out = new ArrayList<>();
+        if (raw == null) return out;
+        String[] parts = raw.split("[,，;；\\s#]+");
+        for (String p : parts) {
+            String s = p == null ? "" : p.trim();
+            if (s.isEmpty() || out.contains(s)) continue;
+            if (s.length() > 12) s = s.substring(0, 12);
+            out.add(s);
+            if (out.size() >= 12) break;
+        }
+        return out;
+    }
+
+    /** 关键词检索：命中标题 / 摘要 / 标签 / 分区 / 模型 / 工作区路径 */
+    public static boolean matches(Conv v, String q) {
+        if (q == null) return true;
+        String k = q.trim().toLowerCase(Locale.ROOT);
+        if (k.isEmpty()) return true;
+        if (v == null) return false;
+        if (hit(v.title, k) || hit(v.summary, k) || hit(v.model, k)
+                || hit(v.section, k) || hit(v.wsPath, k)) return true;
+        if (v.tags != null) for (String s : v.tags) if (hit(s, k)) return true;
+        return false;
+    }
+
+    private static boolean hit(String s, String k) {
+        return s != null && !s.isEmpty() && s.toLowerCase(Locale.ROOT).contains(k);
+    }
+
+    /** 收集全部分区名（去重，按出现顺序） */
+    public static List<String> sectionsOf(List<Conv> list) {
+        List<String> out = new ArrayList<>();
+        if (list == null) return out;
+        for (Conv v : list) {
+            String s = v.section == null || v.section.isEmpty() ? "默认工作区" : v.section;
+            if (!out.contains(s)) out.add(s);
+        }
+        return out;
+    }
+
+    /** 收集全部标签（去重，按出现频次排序） */
+    public static List<String> tagsOf(List<Conv> list) {
+        List<String> out = new ArrayList<>();
+        if (list == null) return out;
+        for (Conv v : list) {
+            if (v.tags == null) continue;
+            for (String s : v.tags) if (!out.contains(s)) out.add(s);
+        }
+        java.util.Collections.sort(out, String.CASE_INSENSITIVE_ORDER);
+        return out;
+    }
+
+    /** 只读取元数据改字段后回写（避免全量载入大会话），失败返回 false */
+    public static boolean patch(Context c, String id, String newSection, Object[] tagArr, Boolean arch) {
+        try {
+            File f = new File(dir(c), id + ".json");
+            if (!f.exists()) return false;
+            if (f.length() > 6_000_000) return false; // 过大不解析，保护内存
+            JSONObject j = new JSONObject(read(f));
+            if (newSection != null) j.put("section", newSection);
+            if (arch != null) j.put("archived", arch.booleanValue());
+            if (tagArr != null) {
+                JSONArray a = new JSONArray();
+                for (Object o : tagArr) if (o != null) a.put(String.valueOf(o));
+                j.put("tags", a);
+            }
+            write(f, j.toString());
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /** 修改标签（同步内存对象与磁盘） */
+    public static boolean setTags(Context c, Conv v, List<String> tags) {
+        if (v == null) return false;
+        v.tags = tags == null ? new ArrayList<String>() : new ArrayList<>(tags);
+        return patch(c, v.id, null, v.tags.toArray(), null);
+    }
+
+    /** 归档 / 取消归档（同步内存对象与磁盘） */
+    public static boolean setArchived(Context c, Conv v, boolean arch) {
+        if (v == null) return false;
+        v.archived = arch;
+        if (arch) {
+            if (v.section == null || v.section.isEmpty()) v.section = "已归档";
+            return patch(c, v.id, v.section, null, Boolean.TRUE);
+        }
+        // 取消归档：回到当前工作区分区
+        v.section = autoSection(c);
+        v.wsPath = Prefs.get(c).workspace(c);
+        return patch(c, v.id, v.section, null, Boolean.FALSE);
+    }
+
+    /** 批量归档 / 取消归档（分区管理用） */
+    public static int setArchivedAll(Context c, List<Conv> list, boolean arch) {
+        int n = 0;
+        if (list == null) return 0;
+        for (Conv v : list) if (setArchived(c, v, arch)) n++;
+        return n;
+    }
+
+    /** 把分区名规范化（防注入空串/超长） */
+    public static String normSection(String s) {
+        String v = s == null ? "" : s.trim();
+        if (v.isEmpty()) return "默认工作区";
+        return v.length() > 24 ? v.substring(0, 24) : v;
+    }
+
+    /** 历史统计：总数 / 归档数 / 分区数 / 标签数 */
+    public static int[] stats(List<Conv> list) {
+        int total = 0, arch = 0;
+        List<String> secs = new ArrayList<>(), tgs = new ArrayList<>();
+        if (list != null) for (Conv v : list) {
+            total++;
+            if (v.archived) arch++;
+            String s = v.section == null || v.section.isEmpty() ? "默认工作区" : v.section;
+            if (!secs.contains(s)) secs.add(s);
+            if (v.tags != null) for (String x : v.tags) if (!tgs.contains(x)) tgs.add(x);
+        }
+        return new int[]{total, arch, secs.size(), tgs.size()};
+    }
+
     public static Conv load(Context c, String id) {
         return load(c, id, 8_000_000);
     }
@@ -456,6 +650,19 @@ public class ConvStore {
             v.updated = j.optLong("updated", v.created);
             v.summary = j.optString("summary", "");
             v.summaryCount = j.optInt("summaryCount", 0);
+            // 历史健壮机制元数据（旧文件缺失时安全兜底）
+            v.archived = j.optBoolean("archived", false);
+            v.section = j.optString("section", "");
+            v.wsPath = j.optString("wsPath", "");
+            v.tags = new ArrayList<>();
+            JSONArray tgs = j.optJSONArray("tags");
+            if (tgs != null) {
+                for (int i = 0; i < tgs.length(); i++) {
+                    String tv = tgs.optString(i, "").trim();
+                    if (!tv.isEmpty() && !v.tags.contains(tv)) v.tags.add(tv);
+                }
+            }
+            autofillArchive(c, v);
             JSONArray ms = j.optJSONArray("messages");
             if (ms != null) {
                 for (int i = 0; i < ms.length(); i++) {
@@ -522,7 +729,7 @@ public class ConvStore {
                         String oldSum = v.summary;
                         v.summary = (oldSum == null || oldSum.isEmpty() ? "" : oldSum + "\n")
                                 + "（启动时自动修复：裁剪了更早的 " + drop + " 条消息）";
-                        v.msgs = new ArrayList<>(v.msgs.subList(v.msgs.size() - 200, v.msgs.size()));
+                        setMsgs(v, v.msgs.subList(v.msgs.size() - 200, v.msgs.size()));
                     }
                     saveSync(c, v);
                 } catch (Throwable ignored) {
@@ -551,6 +758,17 @@ public class ConvStore {
             j.put("updated", v.updated);
             j.put("summary", v.summary == null ? "" : v.summary);
             j.put("summaryCount", v.summaryCount);
+            // 历史健壮机制：标签 / 归档 / 分区 / 工作区落盘
+            try {
+                if (v.tags != null && !v.tags.isEmpty()) {
+                    JSONArray tg = new JSONArray();
+                    for (String s : v.tags) if (s != null && !s.trim().isEmpty()) tg.put(s.trim());
+                    j.put("tags", tg);
+                }
+                if (v.archived) j.put("archived", true);
+                if (v.section != null && !v.section.isEmpty()) j.put("section", v.section);
+                if (v.wsPath != null && !v.wsPath.isEmpty()) j.put("wsPath", v.wsPath);
+            } catch (Throwable ignored) {}
             JSONArray ms = new JSONArray();
             for (int i = 0; i < v.msgs.size(); i++) {
                 Msg m;
@@ -593,7 +811,7 @@ public class ConvStore {
                     String oldSum = v.summary;
                     v.summary = (oldSum == null || oldSum.isEmpty() ? "" : oldSum + "\n")
                             + "（系统于内存不足时自动裁剪了更早的 " + (v.msgs.size() - keep) + " 条消息）";
-                    v.msgs = kept;
+                    setMsgs(v, kept);
                     try {
                         saveSync(c, v);
                     } catch (Throwable t2) {
@@ -630,12 +848,38 @@ public class ConvStore {
             String oldSum = v.summary;
             String marker = "（系统自动裁剪了更早的 " + drop + " 条消息）";
             v.summary = (oldSum == null || oldSum.isEmpty() ? "" : oldSum + "\n") + marker;
-            v.msgs = new ArrayList<>(v.msgs.subList(v.msgs.size() - keep, v.msgs.size()));
+            setMsgs(v, v.msgs.subList(v.msgs.size() - keep, v.msgs.size()));
         } catch (Throwable ignored) {}
     }
 
     public static void delete(Context c, String id) {
         new File(dir(c), id + ".json").delete();
+    }
+
+    /** 统计本机会话数量（含归档）。 */
+    public static int countAll(Context c) {
+        File[] fs = dir(c).listFiles();
+        if (fs == null) return 0;
+        int n = 0;
+        for (File f : fs) if (f.getName().endsWith(".json")) n++;
+        return n;
+    }
+
+    /** 清空全部历史：先等待未落盘写入完成，再删除会话目录下所有 .json。
+     *  返回实际删除的文件数。任何单个文件失败都被吞掉，保证不抛异常。 */
+    public static int deleteAll(Context c) {
+        flush(3000);
+        int n = 0;
+        File[] fs = dir(c).listFiles();
+        if (fs != null) {
+            for (File f : fs) {
+                try {
+                    if (!f.getName().endsWith(".json")) continue;
+                    if (f.delete()) n++;
+                } catch (Throwable ignored) {}
+            }
+        }
+        return n;
     }
 
     public static String exportAll(Context c) {
@@ -713,5 +957,73 @@ public class ConvStore {
         FileOutputStream fo = new FileOutputStream(f);
         fo.write(s.getBytes(StandardCharsets.UTF_8));
         fo.close();
+    }
+
+    /** 把外部列表灌入线程安全消息列表（瘦身/裁剪后回写用） */
+    static void setMsgs(Conv v, List<Msg> src) {
+        if (v == null) return;
+        SyncList<Msg> s = new SyncList<>();
+        if (src != null) s.addAll(src);
+        v.msgs = s;
+    }
+}
+
+/**
+ * 工具线程安全的消息列表：所有读写与迭代都在同一把锁下完成，
+ * 迭代器返回快照，彻底杜绝「工具线程 add / UI 线程遍历」导致的
+ * ConcurrentModificationException 与 IndexOutOfBoundsException（闪退根因）。
+ */
+class SyncList<E> extends java.util.ArrayList<E> {
+    private final Object lock = new Object();
+
+    @Override public int size() { synchronized (lock) { return super.size(); } }
+
+    @Override public boolean add(E e) { synchronized (lock) { return super.add(e); } }
+
+    @Override public void add(int i, E e) { synchronized (lock) { super.add(i, e); } }
+
+    @Override public E get(int i) {
+        synchronized (lock) {
+            if (i < 0 || i >= super.size()) return null;
+            return super.get(i);
+        }
+    }
+
+    @Override public E remove(int i) { synchronized (lock) { return super.remove(i); } }
+
+    @Override public boolean remove(Object o) { synchronized (lock) { return super.remove(o); } }
+
+    @Override public void clear() { synchronized (lock) { super.clear(); } }
+
+    @Override public boolean addAll(java.util.Collection<? extends E> c) {
+        synchronized (lock) { return super.addAll(c); }
+    }
+
+    @Override public boolean isEmpty() { synchronized (lock) { return super.isEmpty(); } }
+
+    @Override public int indexOf(Object o) { synchronized (lock) { return super.indexOf(o); } }
+
+    @Override public boolean contains(Object o) { synchronized (lock) { return super.contains(o); } }
+
+    @Override public Object[] toArray() { synchronized (lock) { return super.toArray(); } }
+
+    /** 返回不可变快照，遍历过程中其它线程增删都不会影响本次迭代 */
+    @Override public java.util.Iterator<E> iterator() {
+        java.util.ArrayList<E> copy;
+        synchronized (lock) { copy = new java.util.ArrayList<>(super.size());
+            for (int i = 0; i < super.size(); i++) copy.add(super.get(i)); }
+        return copy.iterator();
+    }
+
+    @Override public java.util.ListIterator<E> listIterator() {
+        return iterator().hasNext() ? snapshot().listIterator() : snapshot().listIterator();
+    }
+
+    private java.util.ArrayList<E> snapshot() {
+        synchronized (lock) { return new java.util.ArrayList<>(super.subList(0, super.size())); }
+    }
+
+    @Override public java.util.List<E> subList(int a, int b) {
+        synchronized (lock) { return new java.util.ArrayList<>(super.subList(a, b)); }
     }
 }

@@ -215,6 +215,81 @@ public class Ui {
         return v;
     }
 
+    /** 圆角搜索框：统一输入外观（去系统下划线、内边距与圆角一致，两端留白对齐） */
+    public static EditText search(Activity a, Theme t, String hint) {
+        EditText e = new EditText(a);
+        e.setHint(hint);
+        e.setSingleLine(true);
+        e.setTextColor(t.textPri);
+        e.setHintTextColor(t.alpha(t.textSec, 0.72f));
+        e.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(a, 13));
+        e.setBackground(ripple(stroke(t.alpha(t.textPri, 0.05f), t.alpha(t.border, 0.95f), dpi(a, 12), dpi(a, 0.7f)), t.alpha(t.textPri, 0.10f)));
+        e.setPadding(dpi(a, 12), dpi(a, 9), dpi(a, 12), dpi(a, 9));
+        return e;
+    }
+
+    /** 往横向 chip 条追加一枚 chip：统一 6dp 右边距与垂直居中对齐 */
+    public static TextView chipInto(Activity a, Theme t, LinearLayout row, String text, boolean active) {
+        TextView c = chip(a, t, text, active);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.rightMargin = dpi(a, 6);
+        lp.gravity = Gravity.CENTER_VERTICAL;
+        row.addView(c, lp);
+        return c;
+    }
+
+    /** 横向 chip 条容器：统一方向/居中/上下留白，保证多条之间对齐一致 */
+    public static LinearLayout chipStrip(Activity a) {
+        LinearLayout row = new LinearLayout(a);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(0, dpi(a, 3), dpi(a, 3), dpi(a, 3));
+        return row;
+    }
+
+    /** 过滤条标题（分区 / 标签前的极小提示字，固定宽度避免两行错位） */
+    public static TextView stripLabel(Activity a, Theme t, String text) {
+        TextView v = new TextView(a);
+        v.setText(text);
+        v.setSingleLine(true);
+        v.setTextColor(t.alpha(t.textSec, 0.85f));
+        v.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(a, 10.5f));
+        v.setGravity(Gravity.CENTER_VERTICAL);
+        v.setPadding(dpi(a, 2), 0, dpi(a, 8), 0);
+        return v;
+    }
+
+    /** 操作面板列表项：整行左对齐、48dp 高，比按钮更整齐（菜单语义） */
+    public static TextView menuItem(Activity a, Theme t, String text, boolean danger) {
+        TextView v = new TextView(a);
+        v.setText(text);
+        v.setSingleLine(true);
+        v.setTextColor(danger ? t.alpha(t.danger, 0.95f) : t.textPri);
+        v.setTextSize(TypedValue.COMPLEX_UNIT_PX, sp(a, 14));
+        v.setGravity(Gravity.CENTER_VERTICAL);
+        v.setMinHeight(dpi(a, 48));
+        v.setPadding(dpi(a, 6), 0, dpi(a, 6), 0);
+        v.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        v.setBackground(ripple(round(Color.TRANSPARENT, dpi(a, 10)), t.alpha(t.textPri, 0.08f)));
+        return v;
+    }
+
+    /** 两端留白一致的按钮行：左取消 / 右确认（等高、间距统一 10dp） */
+    public static LinearLayout actionRow(Activity a, Theme t, TextView left, TextView right) {
+        LinearLayout row = new LinearLayout(a);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams lp1 = new LinearLayout.LayoutParams(0, dpi(a, 42), 1f);
+        lp1.rightMargin = dpi(a, 10);
+        left.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams lp2 = new LinearLayout.LayoutParams(0, dpi(a, 42), 1f);
+        right.setGravity(Gravity.CENTER);
+        row.addView(left, lp1);
+        row.addView(right, lp2);
+        return row;
+    }
+
     public static LinearLayout row(Activity a, Theme t) {
         LinearLayout l = new LinearLayout(a);
         l.setOrientation(LinearLayout.HORIZONTAL);

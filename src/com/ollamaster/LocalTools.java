@@ -1336,7 +1336,9 @@ public class LocalTools {
 
     private static WebPage webPage() {
         MainActivity act = MainActivity.instance();
-        return act == null ? null : act.webPage();
+        // Activity 已结束/销毁时禁止再触碰 WebView（后台工具线程访问会抛异常甚至崩溃）
+        if (act == null || act.isFinishing() || act.isDestroyed()) return null;
+        return act.webPage();
     }
 
     private static String jsStr(String raw) {
@@ -1465,8 +1467,24 @@ public class LocalTools {
         if (wp == null || act == null) return "错误：浏览器不可用";
         wp.focus();
         try { Thread.sleep(700); } catch (InterruptedException ignored) {}
-        android.graphics.Bitmap bmp = wp.screenshot();
+        android.graphics.Bitmap bmp = null;
+        try {
+            bmp = wp.screenshot();
+        } catch (Throwable e) {
+            ErrLog.log(App.inst, "browserScreenshot", e);
+            return "截图失败：" + e.getClass().getSimpleName();
+        }
         if (bmp == null) return "截图失败（请确保浏览器页处于可见状态）";
+        // 超大截图降采样，避免 PNG 压缩/编码阶段 OOM 直接崩溃
+        int maxSide = 1600;
+        if (bmp.getWidth() > maxSide || bmp.getHeight() > maxSide) {
+            try {
+                float scale = Math.min(maxSide / (float) bmp.getWidth(), maxSide / (float) bmp.getHeight());
+                android.graphics.Bitmap small = android.graphics.Bitmap.createScaledBitmap(
+                        bmp, Math.max(1, (int) (bmp.getWidth() * scale)), Math.max(1, (int) (bmp.getHeight() * scale)), true);
+                if (small != bmp) { bmp.recycle(); bmp = small; }
+            } catch (Throwable ignored) {}
+        }
         String rel = a.optString("path", "").trim();
         if (rel.contains("/") || rel.contains("\\")) throw new Exception("path 仅允许文件名");
         java.io.File dir = new java.io.File(convWorkspace(), "browsershots");
@@ -1474,9 +1492,17 @@ public class LocalTools {
         java.io.File f = new java.io.File(dir, rel.isEmpty()
                 ? "auto_" + new java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(new java.util.Date()) + ".png"
                 : rel);
-        java.io.FileOutputStream fo = new java.io.FileOutputStream(f);
-        bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 90, fo);
-        fo.close();
+        try {
+            java.io.FileOutputStream fo = new java.io.FileOutputStream(f);
+            bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 90, fo);
+            fo.flush();
+            fo.close();
+        } catch (Throwable e) {
+            ErrLog.log(App.inst, "browserScreenshot.save", e);
+            return "截图保存失败：" + e.getClass().getSimpleName() + "（可能空间不足）";
+        } finally {
+            try { bmp.recycle(); } catch (Throwable ignored) {}
+        }
         return "已保存截图：" + f.getAbsolutePath() + "（" + bmp.getWidth() + "×" + bmp.getHeight() + "）。"
                 + "如需理解画面，用 web_vision(path=该文件, question=你想问的问题)";
     }

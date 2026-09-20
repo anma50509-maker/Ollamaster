@@ -237,7 +237,7 @@ public class WebPage extends Page {
         final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
         act.runOnUiThread(() -> {
             try {
-                if (web == null) { latch.countDown(); return; }
+                if (web == null || act.isFinishing() || act.isDestroyed()) { latch.countDown(); return; }
                 web.evaluateJavascript(js, v -> { out[0] = v; latch.countDown(); });
             } catch (Exception e) { latch.countDown(); }
         });
@@ -271,6 +271,7 @@ public class WebPage extends Page {
             final Bitmap[] box = {null};
             final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
             act.runOnUiThread(() -> {
+                if (act.isFinishing() || act.isDestroyed()) { latch.countDown(); return; }
                 try {
                     android.view.View decor = act.getWindow().getDecorView();
                     int w = decor.getWidth(), h = decor.getHeight();
@@ -279,11 +280,12 @@ public class WebPage extends Page {
                     PixelCopy.request(act.getWindow(), new Rect(0, 0, w, h), bmp,
                             result -> { box[0] = result == PixelCopy.SUCCESS ? bmp : null; latch.countDown(); },
                             new Handler(Looper.getMainLooper()));
-                } catch (Exception e) { latch.countDown(); }
+                } catch (Throwable e) { ErrLog.log(App.inst, "WebPage.screenshot", e); latch.countDown(); }
             });
             try { latch.await(2500, java.util.concurrent.TimeUnit.MILLISECONDS); } catch (InterruptedException ignored) {}
             return box[0];
-        } catch (Exception e) {
+        } catch (Throwable e) {
+            ErrLog.log(App.inst, "WebPage.screenshot.outer", e);
             return null;
         }
     }

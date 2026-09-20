@@ -23,6 +23,21 @@ class ChatBubbles {
     final ChatPage cp;
     final MainActivity act;
 
+    /** 适配器只读快照：仅 UI 线程经 fill() 写入，适配器回调只读。
+     *  这样后台线程（工具/流式/记忆写入）改动 conv.msgs，不会破坏 ListView
+     *  在 getCount/getItemViewType/getView 之间的一致性 —— 修复
+     *  IndexOutOfBoundsException 与 "adapter has changed but did not receive a
+     *  notification" 两类崩溃。所有可见性更新统一走 ChatPage.syncAdapter()。 */
+    final java.util.ArrayList<ConvStore.Msg> rows = new java.util.ArrayList<>();
+
+    boolean inRange(int p) { return p >= 0 && p < rows.size(); }
+
+    /** UI 线程：先快照、后通知（由 ChatPage.syncAdapter 调用） */
+    void fill(java.util.List<ConvStore.Msg> src) {
+        rows.clear();
+        if (src != null) rows.addAll(src);
+    }
+
     ChatBubbles(ChatPage cp) {
         this.cp = cp;
         this.act = cp.act;
@@ -31,26 +46,30 @@ class ChatBubbles {
     /** 虚拟化消息列表：ListView 只测量/布局屏幕内的气泡，历史长度不再拖慢流式刷新 */
     BaseAdapter adapter() {
         return new BaseAdapter() {
-            @Override public int getCount() { return cp.conv == null ? 0 : cp.conv.msgs.size(); }
-            @Override public Object getItem(int position) { return cp.conv.msgs.get(position); }
+            @Override public int getCount() { return rows.size(); }
+            @Override public Object getItem(int position) { return inRange(position) ? rows.get(position) : null; }
             @Override public long getItemId(int position) { return position; }
             @Override public int getViewTypeCount() { return 3; }
             @Override public int getItemViewType(int position) {
-                String r = cp.conv.msgs.get(position).role;
+                ConvStore.Msg mm = inRange(position) ? rows.get(position) : null;
+                if (mm == null) return 2;
+                String r = mm.role;
                 if ("user".equals(r)) return 0;
                 if ("assistant".equals(r)) return 1;
                 return 2;
             }
             @Override public View getView(int position, View convertView, ViewGroup parent) {
-                final ConvStore.Msg m = cp.conv.msgs.get(position);
+                final ConvStore.Msg m = inRange(position) ? rows.get(position) : null;
+                if (m == null) return new TextView(act);
                 try {
                     String r = m.role;
                     if ("user".equals(r)) return buildUserBubble(m);
                     if ("assistant".equals(r)) return buildAiBubble(m);
                     return buildSmallCard(m);
                 } catch (Throwable e) {
+                    ErrLog.log(act, "bubble.getView", e);
                     TextView fb = new TextView(act);
-                    fb.setText(m.content);
+                    fb.setText(m.content == null ? "" : m.content);
                     fb.setTextColor(cp.t.textPri);
                     fb.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.spi(act, 14.5f));
                     int pad = Ui.dpi(act, 10);
