@@ -1163,7 +1163,16 @@ public class ChatPage extends Page {
             }
         }
 
-        // 记录第一条用户任务指令：裁剪时永远保留，防止 Agent 长任务中"遗忘任务"
+        // 记录【最近一条】用户任务提示 + 最早一条（仅作背景）：
+        // 裁剪时钉住的必须是「距离最近的任务提示」，否则长循环中只会记得最初的提示。
+        ConvStore.Msg latestUserMsg = null;
+        for (int i = hist.size() - 1; i >= 0; i--) {
+            ConvStore.Msg m = hist.get(i);
+            if ("user".equals(m.role) && m.content != null && !m.content.trim().isEmpty()) {
+                latestUserMsg = m;
+                break;
+            }
+        }
         ConvStore.Msg firstUserMsg = null;
         for (ConvStore.Msg m : hist) {
             if ("user".equals(m.role)) { firstUserMsg = m; break; }
@@ -1197,13 +1206,30 @@ public class ChatPage extends Page {
             for (int i = hist.size() - 1; i >= 0; i--) {
                 ConvStore.Msg m = hist.get(i);
                 int msgTokens = estimateMsgTokens(m);
-                if (totalTokens + msgTokens > budget) break;
+                if (totalTokens + msgTokens > budget) {
+                    // 防「历史清零」：最新一条本身就超预算时也必须保留它（压缩内容而非整体丢弃）。
+                    // 旧逻辑在此直接 break 且 keepFrom 停在 hist.size() → 历史被整段丢弃，
+                    // 上下文只剩「系统提示 + 最初那条用户消息」，表现为 Agent 只记得第一条任务提示，
+                    // 之后用户发的所有新提示全部遗忘。
+                    if (i == hist.size() - 1) {
+                        // 只压缩工具/助手输出这类可再生内容，用户输入永不改写
+                        if (m.content != null && !"user".equals(m.role)) {
+                            int cap = Math.max(200, budget * 2);
+                            if (m.content.length() > cap) m.content = smartTruncateTool(m.content, cap);
+                        }
+                        totalTokens += estimateMsgTokens(m);
+                        keepFrom = i;
+                    }
+                    break;
+                }
                 totalTokens += msgTokens;
                 keepFrom = i;
             }
+            // 兜底：任何情况下都不得把历史清空，至少保留最近一条消息
+            if (!hist.isEmpty() && keepFrom >= hist.size()) keepFrom = hist.size() - 1;
             if (keepFrom > 0) {
                 List<ConvStore.Msg> trimmed = new ArrayList<>(hist.subList(keepFrom, hist.size()));
-                ensureFirstUser(trimmed, firstUserMsg);
+                ensureLatestTask(trimmed, latestUserMsg, firstUserMsg);
                 hist = trimmed;
             }
         } else {
@@ -1211,7 +1237,7 @@ public class ChatPage extends Page {
             int keep = Math.max(0, Prefs.get(act).ctxMsgs());
             if (hist.size() > keep) {
                 List<ConvStore.Msg> trimmed = new ArrayList<>(hist.subList(hist.size() - keep, hist.size()));
-                ensureFirstUser(trimmed, firstUserMsg);
+                ensureLatestTask(trimmed, latestUserMsg, firstUserMsg);
                 hist = trimmed;
             }
         }
@@ -1303,13 +1329,57 @@ public class ChatPage extends Page {
         return head + "\n...[tool 结果已压缩，原始 " + content.length() + " 字符]";
     }
 
-    /** 防止"任务遗忘"：裁剪后若丢失最初的用户任务指令，将其放回队首（不影响 tool_call 链） */
-    private static void ensureFirstUser(List<ConvStore.Msg> list, ConvStore.Msg firstUser) {
-        if (firstUser == null) return;
-        for (ConvStore.Msg m : list) {
-            if (m == firstUser) return;
+    /** 防止"任务遗忘"：裁剪后保证【最近一条用户任务提示】仍在上下文中。
+     *  钉在队尾（在 tool 消息之后追加 user 是合法序列，且不会破坏 tool_call 链）；
+     *  最早那条任务提示仅压缩为一行「背景」，优先级低于最新提示。 */
+    private static void ensureLatestTask(List<ConvStore.Msg> list, ConvStore.Msg latestUser,
+                                         ConvStore.Msg firstUser) {
+        if (latestUser != null) {
+            boolean present = false;
+            for (ConvStore.Msg m : list) if (m == latestUser) { present = true; break; }
+            if (!present) list.add(latestUser);
         }
-        list.add(0, firstUser);
+        if (firstUser != null && firstUser != latestUser) {
+            boolean present = false;
+            for (ConvStore.Msg m : list) if (m == firstUser) { present = true; break; }
+            if (!present) {
+                String t = firstUser.content == null ? "" : firstUser.content.trim();
+                if (t.length() > 120) t = t.substring(0, 120) + "…";
+                list.add(0, new ConvStore.Msg("user", "【最初任务·仅作背景，最新任务在下方】" + t));
+            }
+        }
+    }
+
+    /** 工具循环中「距离最近的任务提示」锚：取最近一条真实用户消息，附当前进度，追加到消息尾部 */
+    private ConvStore.Msg recentTaskAnchor() {
+        if (conv == null) return null;
+        String task = null;
+        for (int i = conv.msgs.size() - 1; i >= 0; i--) {
+            ConvStore.Msg m = conv.msgs.get(i);
+            if ("user".equals(m.role) && m.content != null && !m.content.trim().isEmpty()) {
+                task = m.content.trim();
+                break;
+            }
+        }
+        if (task == null || task.isEmpty()) return null;
+        if (task.length() > 600) task = task.substring(0, 600) + "…";
+        String note = toolRounds > 0
+                ? "（这是你需要完成的最新任务提示，优先级高于更早的对话内容；"
+                  + "已执行 " + toolRounds + " 轮工具调用，请基于最新工具结果继续，"
+                  + "直到调用 task_complete 结束任务。）"
+                : "（这是你需要完成的最新任务提示，优先级高于更早的对话内容。）";
+        return new ConvStore.Msg("user", "【当前任务提示·最新】\n" + task + "\n" + note);
+    }
+
+    /** 判断消息尾部是否已经以 user 指令收束（跳过 tool 结果往前看）：是则无需重复注入任务锚 */
+    private static boolean tailEndsWithUser(List<ConvStore.Msg> msgs) {
+        if (msgs == null) return false;
+        for (int i = msgs.size() - 1; i >= 0; i--) {
+            ConvStore.Msg m = msgs.get(i);
+            if ("user".equals(m.role)) return true;
+            if (!"tool".equals(m.role)) return false;
+        }
+        return false;
     }
 
     private static int estimateTokens(String s) {
@@ -1728,6 +1798,12 @@ public class ChatPage extends Page {
                 Ui.H.post(() -> updateToolHint(specs));
                 final List<ConvStore.Msg> apiMsgs = apiMessages(withTools);
                 if (contHint != null) apiMsgs.add(new ConvStore.Msg("user", contHint));
+                // 工具循环续轮：显式注入「距离最近的任务提示」+ 当前进度，
+                // 防止 Agent 在长工具链中任务漂移或只记得最初那条提示
+                if (contHint == null && toolRounds > 0 && !tailEndsWithUser(apiMsgs)) {
+                    ConvStore.Msg anchor = recentTaskAnchor();
+                    if (anchor != null) apiMsgs.add(anchor);
+                }
                 final long t0 = android.os.SystemClock.elapsedRealtime();
                 turnT0 = t0;
                 renderDiag[0] = -1;
