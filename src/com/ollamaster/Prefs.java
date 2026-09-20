@@ -205,43 +205,4 @@ public class Prefs {
 
     public void workspace(String v) { sp.edit().putString("workspace", v).apply(); }
 
-    // ===== 模型档位（切换模型 + 参数预设）=====
-
-    /** 内置档位：一键切换模型 + 采样参数预设；model 为空表示不改动当前模型 */
-    private static final ModelTier[] BUILTIN_TIERS = {
-        new ModelTier("fast", "\u26a1 \u6781\u901f", "\u4f4e\u5ef6\u8fdf\u3001\u4f4e\u6210\u672c\uff0c\u9002\u5408\u7b80\u5355\u95ee\u7b54\u3001\u4ee3\u7801\u8865\u5168", "", 0.3f, 1024, 0.9f, true),
-        new ModelTier("balanced", "\u2696 \u5e73\u8861", "\u901a\u7528\u573a\u666f\u63a8\u8350\uff0c\u63a8\u7406\u4e0e\u901f\u5ea6\u517c\u987e", "", 0.7f, 2048, 0.9f, true),
-        new ModelTier("quality", "\ud83c\udfaf \u8d28\u91cf", "\u6df1\u5ea6\u63a8\u7406\u3001\u590d\u6742\u4efb\u52a1\uff0c\u6e29\u5ea6\u8f83\u4f4e\u3001\u8f93\u51fa\u8f83\u957f", "", 0.5f, 4096, 0.95f, true),
-        new ModelTier("creative", "\ud83c\udfa8 \u521b\u610f", "\u9ad8\u6e29\u5ea6\u3001\u591a\u6837\u6027\u5f3a\uff0c\u9002\u5408\u5199\u4f5c\u3001\u5934\u8111\u98ce\u66b4", "", 0.9f, 2048, 0.95f, true),
-        new ModelTier("code", "\ud83d\udcbb \u4ee3\u7801", "\u4f4e\u6e29\u5ea6\u3001\u786e\u5b9a\u6027\u5f3a\uff0c\u9002\u5408\u7f16\u7a0b\u3001\u91cd\u6784\u3001\u8c03\u8bd5", "", 0.2f, 3072, 0.9f, true),
-        new ModelTier("local", "\ud83c\udfe0 \u672c\u5730\u4f18\u5148", "\u4f18\u5148\u4f7f\u7528\u672c\u5730 Ollama \u6a21\u578b\uff0c\u79bb\u7ebf\u53ef\u7528", "", 0.7f, 2048, 0.9f, true)
-    };
-
-    /** 模型档位定义：模型 + 采样参数预设 */
-    public static class ModelTier {
-        public final String id, name, desc, model;
-        public final float temperature, topP;
-        public final int maxTokens;
-        public final boolean stream;
-
-        public ModelTier(String id, String name, String desc, String model,
-                         float temperature, int maxTokens, float topP, boolean stream) {
-            this.id = id;
-            this.name = name;
-            this.desc = desc;
-            this.model = model;
-            this.temperature = temperature;
-            this.maxTokens = maxTokens;
-            this.topP = topP;
-            this.stream = stream;
-        }
-    }
-
-    public static ModelTier[] getBuiltinTiers() { return BUILTIN_TIERS; }
-
-    public String modelTier() { return sp.getString("modelTier", "balanced"); }
-    public void modelTier(String v) { sp.edit().putString("modelTier", v).apply(); }
-
-    public String customTiersJson() { return sp.getString("customTiersJson", "{}"); }
-    public void customTiersJson(String v) { sp.edit().putString("customTiersJson", v).apply(); }
 }

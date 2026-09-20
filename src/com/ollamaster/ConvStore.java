@@ -288,6 +288,8 @@ public class ConvStore {
         public List<Msg> msgs = new ArrayList<>();
         public String summary = "";
         public int summaryCount = 0;
+        /** 轻量列表用的消息条数（listMeta 填充，msgs 保持空，避免全量解析 OOM） */
+        public transient int msgCount = 0;
     }
 
     private static File dir(Context c) {
@@ -343,18 +345,106 @@ public class ConvStore {
         File[] fs = dir(c).listFiles();
         if (fs != null) {
             for (File f : fs) {
-                Conv v = load(c, f.getName().replace(".json", ""));
-                if (v != null) out.add(v);
+                try {
+                    Conv v = load(c, f.getName().replace(".json", ""));
+                    if (v != null) {
+                        v.msgCount = v.msgs.size();
+                        out.add(v);
+                    }
+                } catch (Throwable t) {
+                    // 单个文件损坏/超内存：跳过，不让整个列表崩溃
+                }
             }
         }
         Collections.sort(out, (a, b) -> Long.compare(b.updated, a.updated));
         return out;
     }
 
-    public static Conv load(Context c, String id) {
+    /** 轻量历史列表：只解析头部元数据（id/title/model/updated/msgCount），
+     *  巨型会话不把 messages 全载入内存，避免历史列表 OOM。 */
+    public static List<Conv> listMeta(Context c) {
+        flush(1500);
+        ArrayList<Conv> out = new ArrayList<>();
+        File[] fs = dir(c).listFiles();
+        if (fs != null) {
+            for (File f : fs) {
+                try {
+                    Conv v = loadMeta(c, f.getName().replace(".json", ""));
+                    if (v != null) out.add(v);
+                } catch (Throwable t) {
+                    // 跳过坏文件
+                }
+            }
+        }
+        Collections.sort(out, (a, b) -> Long.compare(b.updated, a.updated));
+        return out;
+    }
+
+    /** 单个会话元数据加载：>2.5MB 的会话只读文件头提取字段，不做全量 JSON 解析 */
+    public static Conv loadMeta(Context c, String id) {
         try {
             File f = new File(dir(c), id + ".json");
             if (!f.exists()) return null;
+            long len = f.length();
+            if (len > 2_500_000) {
+                // 超大文件：只读头部 24KB，正则提取关键字段
+                java.io.FileInputStream fi = new java.io.FileInputStream(f);
+                byte[] buf = new byte[24 * 1024];
+                int n = fi.read(buf);
+                fi.close();
+                String head = new String(buf, 0, Math.max(0, n), StandardCharsets.UTF_8);
+                Conv v = new Conv();
+                v.id = id;
+                String title = grabJson(head, "title");
+                v.title = (title == null || title.isEmpty()) ? "长会话" : title;
+                v.model = grabJson(head, "model");
+                if (v.model == null) v.model = "";
+                String up = grabJson(head, "updated");
+                if (up == null) up = grabJson(head, "created");
+                v.updated = up == null ? f.lastModified() : parseLongSafe(up);
+                v.created = v.updated;
+                v.msgCount = -1; // 未知条数（避免全量解析）
+                return v;
+            }
+            Conv v = load(c, id);
+            if (v != null) v.msgCount = v.msgs.size();
+            return v;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** 从 JSON 头部片段中提取 "key":"value"（只处理简单字符串值） */
+    private static String grabJson(String head, String key) {
+        try {
+            String k = "\"" + key + "\"";
+            int i = head.indexOf(k);
+            if (i < 0) return null;
+            int c = head.indexOf(':', i + k.length());
+            if (c < 0) return null;
+            int s = head.indexOf('"', c);
+            if (s < 0) return null;
+            int e = head.indexOf('"', s + 1);
+            if (e < 0) return null;
+            return head.substring(s + 1, e);
+        } catch (Throwable t) { return null; }
+    }
+
+    private static long parseLongSafe(String s) {
+        try { return Long.parseLong(s.trim()); } catch (Throwable t) { return System.currentTimeMillis(); }
+    }
+
+    public static Conv load(Context c, String id) {
+        return load(c, id, 8_000_000);
+    }
+
+    /** load 内部实现：maxBytes 为全量解析上限（>上限返回 null，防止 OOM） */
+    private static Conv load(Context c, String id, long maxBytes) {
+        try {
+            File f = new File(dir(c), id + ".json");
+            if (!f.exists()) return null;
+            // 超大文件（>maxBytes）拒绝全量解析：避免 OOM 崩溃（历史列表已用 loadMeta 轻量展示）
+            if (f.length() > maxBytes) return null;
             String s = read(f);
             JSONObject j = new JSONObject(s);
             Conv v = new Conv();
@@ -396,9 +486,50 @@ public class ConvStore {
                 }
             }
             return v;
+        } catch (OutOfMemoryError oom) {
+            return null;
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /** 启动自愈：遍历会话目录，把超大/过重文件就地瘦身修复。
+     *  针对旧版把工具结果/超长消息整段写入导致文件膨胀的场景：
+     *  1) 文件 > 6MB：全量解析后仅保留尾部 200 条 + 截断超长字段，重写文件
+     *  2) 任何文件：解析后消息字段超长的截断（防再次膨胀）
+     *  全程吞掉所有 Throwable（含 OOM），绝不让启动线程崩溃。 */
+    public static void shrinkOversized(Context c) {
+        try {
+            File[] fs = dir(c).listFiles();
+            if (fs == null) return;
+            for (File f : fs) {
+                try {
+                    if (!f.getName().endsWith(".json")) continue;
+                    if (f.length() <= 6_000_000) continue; // 只在文件异常大时处理
+                    String id = f.getName().replace(".json", "");
+                    Conv v = load(c, id, 30_000_000); // 瘦身路径允许更大上限，尽量修复已损坏的超大文件
+                    if (v == null) continue;
+                    // 截断超长字段
+                    for (Msg m : v.msgs) {
+                        if (m.content != null && m.content.length() > 8000)
+                            m.content = m.content.substring(0, 8000) + "\n…[已截断]";
+                        if (m.reasoning != null && m.reasoning.length() > 4000)
+                            m.reasoning = m.reasoning.substring(0, 4000) + "\n…[已截断]";
+                    }
+                    // 仅保留尾部 200 条
+                    if (v.msgs.size() > 200) {
+                        int drop = v.msgs.size() - 200;
+                        String oldSum = v.summary;
+                        v.summary = (oldSum == null || oldSum.isEmpty() ? "" : oldSum + "\n")
+                                + "（启动时自动修复：裁剪了更早的 " + drop + " 条消息）";
+                        v.msgs = new ArrayList<>(v.msgs.subList(v.msgs.size() - 200, v.msgs.size()));
+                    }
+                    saveSync(c, v);
+                } catch (Throwable ignored) {
+                    // 单个文件瘦身失败跳过
+                }
+            }
+        } catch (Throwable ignored) {}
     }
 
     /** 异步保存：JSON 序列化与写盘均在后台线程执行，主线程零阻塞 */
@@ -409,6 +540,8 @@ public class ConvStore {
 
     public static void saveSync(Context c, Conv v) {
         try {
+            // 预防性瘦身：消息数或总量过大时，先丢弃早期消息（写进 summary 标记），避免序列化 OOM
+            tryTrimExcessive(v);
             JSONObject j = new JSONObject();
             j.put("id", v.id);
             j.put("title", v.title);
@@ -450,7 +583,55 @@ public class ConvStore {
             }
             j.put("messages", ms);
             write(new File(dir(c), v.id + ".json"), j.toString());
-        } catch (Exception ignored) {}
+        } catch (OutOfMemoryError oom) {
+            // OOM 保护：不崩溃。尝试瘦身后再存，仍失败则丢弃该次保存（内存已紧张，硬写更糟）
+            try {
+                if (v.msgs.size() > 0) {
+                    // 保留最近 40 条 + summary 标记，丢弃早期消息
+                    int keep = Math.min(v.msgs.size(), 40);
+                    List<Msg> kept = new ArrayList<>(v.msgs.subList(v.msgs.size() - keep, v.msgs.size()));
+                    String oldSum = v.summary;
+                    v.summary = (oldSum == null || oldSum.isEmpty() ? "" : oldSum + "\n")
+                            + "（系统于内存不足时自动裁剪了更早的 " + (v.msgs.size() - keep) + " 条消息）";
+                    v.msgs = kept;
+                    try {
+                        saveSync(c, v);
+                    } catch (Throwable t2) {
+                        // 瘦身仍失败：丢弃保存，避免崩溃
+                    }
+                }
+            } catch (Throwable t2) {
+                // 忽略
+            }
+        } catch (Throwable t) {
+            // 任何异常都不让后台线程崩溃（OOM 是 Error，必须用 Throwable 捕获）
+        }
+    }
+
+    /** 预防性瘦身：消息超量/内容超重时裁剪早期消息（保留最近 N 条），防止会话 JSON 无限膨胀导致 OOM。
+     *  裁剪结果写入 summary，保证旧消息「痕迹」仍在。 */
+    private static void tryTrimExcessive(Conv v) {
+        try {
+            if (v == null || v.msgs == null || v.msgs.isEmpty()) return;
+            // 粗估总体字符量：所有消息 content + reasoning + tools
+            long totalChars = 0;
+            int maxMsgs = 400;         // 单会话最多保留 400 条消息
+            long maxChars = 3_000_000; // 单会话序列化前粗估上限 ~300 万字符（约 6MB JSON）
+            for (Msg m : v.msgs) {
+                totalChars += m.content == null ? 0 : m.content.length();
+                totalChars += m.reasoning == null ? 0 : m.reasoning.length();
+                if (m.tools != null) {
+                    for (ToolCall t : m.tools) totalChars += t.args == null ? 0 : t.args.length();
+                }
+            }
+            if (v.msgs.size() <= maxMsgs && totalChars <= maxChars) return;
+            int keep = Math.min(v.msgs.size(), maxMsgs);
+            int drop = v.msgs.size() - keep;
+            String oldSum = v.summary;
+            String marker = "（系统自动裁剪了更早的 " + drop + " 条消息）";
+            v.summary = (oldSum == null || oldSum.isEmpty() ? "" : oldSum + "\n") + marker;
+            v.msgs = new ArrayList<>(v.msgs.subList(v.msgs.size() - keep, v.msgs.size()));
+        } catch (Throwable ignored) {}
     }
 
     public static void delete(Context c, String id) {

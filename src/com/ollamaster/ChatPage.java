@@ -54,7 +54,6 @@ public class ChatPage extends Page {
     private EditText input;
     private FrameLayout sendBtn;
     private TextView modelChip, personaChip, sysChip;
-    private TextView tierChip;
     private TextView autoTtsBtn;
     private ImageView attachBtn;
     private LinearLayout attachRow;
@@ -221,15 +220,6 @@ public class ChatPage extends Page {
         bar.setOrientation(LinearLayout.HORIZONTAL);
         bar.setGravity(Gravity.CENTER_VERTICAL);
         bar.setPadding(Ui.dpi(act, 14), Ui.dpi(act, 2), Ui.dpi(act, 14), Ui.dpi(act, 6));
-
-        tierChip = Ui.chip(act, t, "\u5e73\u8861", false);
-        Icon.pinLeft(tierChip, "sliders", 12);
-        Icon.pinRight(tierChip, "chevronDown", 10);
-        tierChip.setGravity(Gravity.CENTER);
-        tierChip.setOnClickListener(v -> dialogs.tierSheet());
-        bar.addView(tierChip, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, Ui.dpi(act, 30)));
-        ((LinearLayout.LayoutParams) tierChip.getLayoutParams()).rightMargin = Ui.dpi(act, 6);
 
         modelChip = Ui.chip(act, t, "模型", false);
         Icon.pinRight(modelChip, "chevronDown", 10);
@@ -942,18 +932,6 @@ public class ChatPage extends Page {
         }
         String chipText = mShort;
         if (!provider.isEmpty()) chipText += " · " + provider;
-        // 档位芯片：显示当前档位名 + 温度速览
-        Prefs.ModelTier ct = currentTier();
-        if (tierChip != null && ct != null) {
-            tierChip.setText(ct.name);
-            tierChip.setTextColor(ct.id.equals(Prefs.get(act).modelTier()) ? t.mixTextOn(t) : t.textSec);
-            tierChip.setBackground(ct.id.equals(Prefs.get(act).modelTier())
-                    ? Ui.round(t.accent, Ui.dpi(act, 999))
-                    : Ui.ripple(Ui.round(t.alpha(t.textPri, 0.06f), Ui.dpi(act, 999)), t.alpha(t.textPri, 0.15f)));
-            tierChip.setCompoundDrawables(null, null, null, null);
-            Icon.pinLeft(tierChip, "sliders", 12);
-            Icon.pinRight(tierChip, "chevronDown", 10);
-        }
         modelChip.setText(chipText);
         modelChip.setCompoundDrawables(null, null, null, null);
         Icon.pinRight(modelChip, "chevronDown", 10);
@@ -980,7 +958,7 @@ public class ChatPage extends Page {
         emptyAvatar.setImageDrawable(d != null ? d : Icon.v(act, "avatar", t.accent, 34));
     }
 
-    /** 供 LocalTools 设置变更后刷新顶部状态（模型/人设/系统/自动语音/档位） */
+    /** 供 LocalTools 设置变更后刷新顶部状态（模型/人设/系统/自动语音） */
     public void refreshChips() {
         if (act == null) return;
         updateChips();
@@ -1185,6 +1163,12 @@ public class ChatPage extends Page {
             }
         }
 
+        // 记录第一条用户任务指令：裁剪时永远保留，防止 Agent 长任务中"遗忘任务"
+        ConvStore.Msg firstUserMsg = null;
+        for (ConvStore.Msg m : hist) {
+            if ("user".equals(m.role)) { firstUserMsg = m; break; }
+        }
+
         // 2) Token 预算控制：maxPromptTokens 生效
         int maxTokens = Prefs.get(act).maxPromptTokens();
         if (maxTokens > 0) {
@@ -1218,13 +1202,17 @@ public class ChatPage extends Page {
                 keepFrom = i;
             }
             if (keepFrom > 0) {
-                hist = new ArrayList<>(hist.subList(keepFrom, hist.size()));
+                List<ConvStore.Msg> trimmed = new ArrayList<>(hist.subList(keepFrom, hist.size()));
+                ensureFirstUser(trimmed, firstUserMsg);
+                hist = trimmed;
             }
         } else {
             // 兼容旧逻辑：ctxMsgs 硬截断
             int keep = Math.max(0, Prefs.get(act).ctxMsgs());
             if (hist.size() > keep) {
-                hist = hist.subList(hist.size() - keep, hist.size());
+                List<ConvStore.Msg> trimmed = new ArrayList<>(hist.subList(hist.size() - keep, hist.size()));
+                ensureFirstUser(trimmed, firstUserMsg);
+                hist = trimmed;
             }
         }
 
@@ -1313,6 +1301,15 @@ public class ChatPage extends Page {
         if (content == null || content.length() <= keepChars) return content;
         String head = content.substring(0, keepChars);
         return head + "\n...[tool 结果已压缩，原始 " + content.length() + " 字符]";
+    }
+
+    /** 防止"任务遗忘"：裁剪后若丢失最初的用户任务指令，将其放回队首（不影响 tool_call 链） */
+    private static void ensureFirstUser(List<ConvStore.Msg> list, ConvStore.Msg firstUser) {
+        if (firstUser == null) return;
+        for (ConvStore.Msg m : list) {
+            if (m == firstUser) return;
+        }
+        list.add(0, firstUser);
     }
 
     private static int estimateTokens(String s) {
@@ -2631,106 +2628,7 @@ public class ChatPage extends Page {
         if (p.cloudMode()) p.activeCloudModel(name);
         else p.activeModel(name);
         if (conv != null) conv.model = name;
-        // 档位语义 = 模型 + 采样参数预设：切换模型后同步当前档位参数，保持一致
-        Prefs.ModelTier ct = currentTier();
-        if (ct != null) {
-            p.temperature(ct.temperature);
-            p.topP(ct.topP);
-            p.maxTokens(ct.maxTokens);
-            p.stream(ct.stream);
-        }
     }
-
-    // ==================== 模型档位 ====================
-
-    /** 全部档位：内置 + 自定义 */
-    java.util.List<Prefs.ModelTier> allTiers() {
-        java.util.List<Prefs.ModelTier> out = new java.util.ArrayList<>();
-        for (Prefs.ModelTier mt : Prefs.getBuiltinTiers()) out.add(mt);
-        try {
-            org.json.JSONObject o = new org.json.JSONObject(Prefs.get(act).customTiersJson());
-            java.util.Iterator<String> it = o.keys();
-            while (it.hasNext()) {
-                String id = it.next();
-                org.json.JSONObject j = o.optJSONObject(id);
-                if (j == null) continue;
-                out.add(new Prefs.ModelTier(id, j.optString("name", id),
-                        j.optString("desc", "自定义档位"), j.optString("model", ""),
-                        (float) j.optDouble("temperature", 0.7), j.optInt("maxTokens", 2048),
-                        (float) j.optDouble("topP", 0.9), j.optBoolean("stream", true)));
-            }
-        } catch (Exception ignored) {}
-        return out;
-    }
-
-    /** 当前档位（找不到则回退 balanced） */
-    Prefs.ModelTier currentTier() {
-        String id = Prefs.get(act).modelTier();
-        for (Prefs.ModelTier mt : allTiers()) if (mt.id.equals(id)) return mt;
-        return Prefs.getBuiltinTiers()[1];
-    }
-
-    static String tierParamBrief(Prefs.ModelTier mt) {
-        return "\u6e29\u5ea6 " + String.format(java.util.Locale.US, "%.2f", mt.temperature)
-                + " \u00b7 \u4e0a\u9650 " + mt.maxTokens
-                + " \u00b7 topP " + String.format(java.util.Locale.US, "%.2f", mt.topP)
-                + (mt.stream ? " \u00b7 \u6d41\u5f0f" : "");
-    }
-
-    /** 应用档位：写入采样参数，并（档位绑定了模型时）切换模型 */
-    void applyTier(Prefs.ModelTier tier) {
-        if (tier == null) return;
-        Prefs p = Prefs.get(act);
-        p.modelTier(tier.id);
-        p.temperature(tier.temperature);
-        p.topP(tier.topP);
-        p.maxTokens(tier.maxTokens);
-        p.stream(tier.stream);
-        if (tier.model != null && !tier.model.isEmpty()) {
-            model = tier.model;
-            applyActiveModel(tier.model);
-        }
-        updateChips();
-        Ui.toast(act, "\u5df2\u5207\u6362\u6863\u4f4d\uff1a" + tier.name + "\uff08" + tierParamBrief(tier) + "\uff09");
-    }
-
-    /** 将当前模型与采样参数另存为自定义档位 */
-    boolean saveCurrentAsTier(String name) {
-        if (name == null || name.trim().isEmpty()) return false;
-        Prefs p = Prefs.get(act);
-        String id = "custom_" + System.currentTimeMillis();
-        try {
-            org.json.JSONObject o = new org.json.JSONObject(p.customTiersJson());
-            org.json.JSONObject j = new org.json.JSONObject();
-            j.put("name", name.trim());
-            j.put("desc", "\u81ea\u5b9a\u4e49 \u00b7 " + (model.isEmpty() ? "\u5f53\u524d\u6a21\u578b" : model));
-            j.put("model", model);
-            j.put("temperature", p.temperature());
-            j.put("maxTokens", p.maxTokens());
-            j.put("topP", p.topP());
-            j.put("stream", p.stream());
-            o.put(id, j);
-            p.customTiersJson(o.toString());
-        } catch (Exception e) { return false; }
-        p.modelTier(id);
-        updateChips();
-        return true;
-    }
-
-    /** 删除自定义档位 */
-    void deleteCustomTier(String id) {
-        if (id == null || id.isEmpty()) return;
-        Prefs p = Prefs.get(act);
-        try {
-            org.json.JSONObject o = new org.json.JSONObject(p.customTiersJson());
-            o.remove(id);
-            p.customTiersJson(o.toString());
-            if (p.modelTier().equals(id)) p.modelTier("balanced");
-        } catch (Exception ignored) {}
-        updateChips();
-    }
-
-
 
     @Override
     public void onShow() {

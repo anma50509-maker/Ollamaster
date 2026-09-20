@@ -127,130 +127,6 @@ class ChatDialogs {
         if (cp.models.isEmpty()) cp.loadModels();
     }
 
-    // ==================== 模型档位 ====================
-
-    /** 档位面板：一键切换「模型 + 采样参数」组合；支持另存当前设置为自定义档位 */
-    void tierSheet() {
-        t = Theme.of(act);
-        final Dialog[] dlgBox = new Dialog[1];
-        final Prefs sp = Prefs.get(act);
-
-        LinearLayout box = new LinearLayout(act);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.addView(Ui.title(act, t, "\u6a21\u578b\u6863\u4f4d"));
-        box.addView(Ui.gap(act, 4));
-        box.addView(Ui.caption(act, t, "\u4e00\u4e2a\u6863\u4f4d = \u6a21\u578b + \u91c7\u6837\u53c2\u6570\u9884\u8bbe\uff0c\u9002\u914d\u4e0d\u540c\u4efb\u52a1\u573a\u666f"));
-        box.addView(Ui.gap(act, 8));
-
-        // 当前生效状态速览
-        String curModel = cp.model == null || cp.model.isEmpty() ? "\u672a\u9009\u62e9\u6a21\u578b" : cp.model;
-        TextView brief = Ui.caption(act, t, "\u5f53\u524d\uff1a" + curModel
-                + " \u00b7 \u6e29\u5ea6 " + String.format(Locale.US, "%.2f", sp.temperature())
-                + " \u00b7 \u4e0a\u9650 " + sp.maxTokens()
-                + " \u00b7 topP " + String.format(Locale.US, "%.2f", sp.topP())
-                + (sp.stream() ? " \u00b7 \u6d41\u5f0f" : " \u00b7 \u975e\u6d41\u5f0f"));
-        brief.setTextColor(t.accent);
-        brief.setLineSpacing(0, 1.15f);
-        box.addView(brief);
-        box.addView(Ui.gap(act, 10));
-
-        // 档位列表（内置 + 自定义）
-        LinearLayout list = new LinearLayout(act);
-        list.setOrientation(LinearLayout.VERTICAL);
-        final String activeId = sp.modelTier();
-        for (final Prefs.ModelTier mt : cp.allTiers()) {
-            final boolean on = mt.id.equals(activeId);
-            LinearLayout row = Ui.row(act, t);
-
-            TextView radio = new TextView(act);
-            radio.setText("");
-            radio.setTextColor(on ? t.accent : t.textSec);
-            Icon.pinLeft(radio, on ? "radioOn" : "radioOff", 18);
-            row.addView(radio, new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-            LinearLayout col = new LinearLayout(act);
-            col.setOrientation(LinearLayout.VERTICAL);
-
-            TextView nameTv = new TextView(act);
-            nameTv.setText(mt.name);
-            nameTv.setTextColor(on ? t.accent : t.textPri);
-            nameTv.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 14));
-            nameTv.setTypeface(on ? Ui.serifBold() : Ui.serif());
-            col.addView(nameTv);
-
-            TextView descTv = new TextView(act);
-            descTv.setText(mt.desc + "\n" + cp.tierParamBrief(mt)
-                    + (mt.model == null || mt.model.isEmpty() ? "" : " \u00b7 \u6a21\u578b " + mt.model));
-            descTv.setTextColor(t.textSec);
-            descTv.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 11));
-            descTv.setLineSpacing(0, 1.15f);
-            col.addView(descTv);
-
-            row.addView(col, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
-            // 自定义档位可删除
-            if (mt.id.startsWith("custom_")) {
-                TextView del = new TextView(act);
-                del.setText("");
-                Icon.pinLeft(del, "trash", 16);
-                del.setPadding(Ui.dpi(act, 10), Ui.dpi(act, 10), Ui.dpi(act, 4), Ui.dpi(act, 10));
-                del.setOnClickListener(v -> {
-                    cp.deleteCustomTier(mt.id);
-                    if (dlgBox[0] != null) dlgBox[0].dismiss();
-                    tierSheet();
-                });
-                row.addView(del);
-            }
-
-            final Prefs.ModelTier target = mt;
-            row.setOnClickListener(v -> {
-                cp.applyTier(target);
-                if (dlgBox[0] != null) dlgBox[0].dismiss();
-            });
-
-            list.addView(row, new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-            list.addView(Ui.hairline(act, t));
-        }
-
-        ScrollView sv = new ScrollView(act);
-        sv.addView(list, new ScrollView.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        box.addView(sv, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, Ui.dpi(act, 300)));
-
-        // 另存当前设置为自定义档位
-        box.addView(Ui.gap(act, 10));
-        LinearLayout saveRow = new LinearLayout(act);
-        saveRow.setOrientation(LinearLayout.HORIZONTAL);
-        saveRow.setGravity(Gravity.CENTER_VERTICAL);
-        final EditText et = Ui.input(act, t, "\u53e6\u5b58\u5f53\u524d\u8bbe\u7f6e\u4e3a\u81ea\u5b9a\u4e49\u6863\u4f4d\u2026", false);
-        saveRow.addView(et, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        TextView ok = Ui.btnGhost(act, t, "\u4fdd\u5b58");
-        ok.setOnClickListener(v -> {
-            String nm = et.getText().toString().trim();
-            if (nm.isEmpty()) {
-                Ui.toast(act, "\u8bf7\u5148\u8f93\u5165\u6863\u4f4d\u540d\u79f0");
-                return;
-            }
-            if (cp.saveCurrentAsTier(nm)) {
-                Ui.toast(act, "\u5df2\u4fdd\u5b58\u81ea\u5b9a\u4e49\u6863\u4f4d\uff1a" + nm);
-                if (dlgBox[0] != null) dlgBox[0].dismiss();
-                tierSheet();
-            } else {
-                Ui.toast(act, "\u4fdd\u5b58\u5931\u8d25");
-            }
-        });
-        saveRow.addView(ok);
-        LinearLayout.LayoutParams olp = (LinearLayout.LayoutParams) ok.getLayoutParams();
-        olp.leftMargin = Ui.dpi(act, 8);
-        box.addView(saveRow);
-
-        dlgBox[0] = Ui.sheet(act, box, t);
-        dlgBox[0].show();
-    }
-
     // ==================== 人设卡 ====================
 
     void personaSheet() {
@@ -757,12 +633,19 @@ class ChatDialogs {
                 return;
             }
             if (name.length() > 18) name = name.substring(0, 17) + "…";
-            c.title = name;
-            ConvStore.save(act, c);
+            // 防写坏：若 c 是轻量元数据（msgs 空且 msgCount>0），先全量加载，避免空消息覆盖原文件
+            ConvStore.Conv target = c;
+            if (c.msgs.isEmpty() && c.msgCount > 0) {
+                ConvStore.Conv full = ConvStore.load(act, c.id);
+                if (full != null) target = full;
+            }
+            target.title = name;
+            ConvStore.save(act, target);
             if (cp.conv != null && cp.conv.id.equals(c.id)) {
                 cp.conv.title = name;
                 ConvStore.save(act, cp.conv);
             }
+            c.title = name; // 同步内存中的元数据对象
             if (lv.getAdapter() != null) ((BaseAdapter) lv.getAdapter()).notifyDataSetChanged();
             w[0].dismiss();
             Ui.toast(act, "已重命名为：" + name);
@@ -819,7 +702,7 @@ class ChatDialogs {
                 title.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 13.5f));
                 TextView sub = (TextView) midCol.getChildAt(1);
                 java.text.SimpleDateFormat df = new java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.getDefault());
-                sub.setText(df.format(new java.util.Date(c.updated)) + " · " + c.msgs.size() + " 条" +
+                sub.setText(df.format(new java.util.Date(c.updated)) + " · " + (c.msgCount >= 0 ? c.msgCount : "?") + " 条" +
                         (c.model.isEmpty() ? "" : " · " + c.model));
                 sub.setTextColor(t.textSec);
                 sub.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 11));
@@ -858,7 +741,7 @@ class ChatDialogs {
         // 独立线程加载历史列表；flush 为无死锁实现，等待有界，不会再卡住“加载中…”
         new Thread(() -> {
             ConvStore.flush(1500);
-            final List<ConvStore.Conv> got = ConvStore.list(act);
+            final List<ConvStore.Conv> got = ConvStore.listMeta(act);
             Ui.H.post(() -> {
                 all.addAll(got);
                 emptyTip.setText("暂无历史会话");

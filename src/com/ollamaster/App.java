@@ -24,5 +24,12 @@ public class App extends Application {
             } catch (Exception ignored) {}
             if (prev != null) prev.uncaughtException(t, e);
         });
+        // 启动自愈：后台将超大会话文件就地瘦身（保留尾部 + 截断超大工具结果），
+        // 修复历史 OOM / 会话打不开 / 保存闪退（由旧版超大会话文件引发）
+        new Thread(() -> {
+            try {
+                ConvStore.shrinkOversized(this);
+            } catch (Throwable ignored) {}
+        }, "om-shrink").start();
     }
 }
