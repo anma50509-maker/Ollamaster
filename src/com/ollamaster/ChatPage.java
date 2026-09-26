@@ -1119,6 +1119,8 @@ public class ChatPage extends Page {
          .append(p.editMode()).append('\u0001')
          .append(p.sysPrompt()).append('\u0001')
          .append(withTools);
+        // 【任务层】把当前任务渲染文本纳入指纹：仅在任务/步骤状态变化时改变，保护前缀缓存
+        if (withTools && conv != null) k.append('\u0001').append(TaskStore.promptBlock(act, conv.id));
         if (p.editMode()) {
             k.append('\u0001').append(Skills.enabledPrompt(act))
              .append('\u0001').append(Plugins.enabledSkillsPrompt(act));
@@ -1172,6 +1174,11 @@ public class ChatPage extends Page {
             sb.append("\n[环境感知] 你拥有持久化记忆库与可扩展的 MCP 服务器、模型池。"
                     + "需要具体数量或清单时，调用 mem_stats / list_mcps / list_settings 按需获取，"
                     + "已知资源优先使用，避免重复探索。");
+            // 【任务层】持久化任务上下文：让模型随时知道进度与下一步，克服长对话遗忘
+            if (conv != null) {
+                String tb = TaskStore.promptBlock(act, conv.id);
+                if (!tb.isEmpty()) sb.append(tb);
+            }
         }
         return sb.toString();
     }
@@ -1691,6 +1698,7 @@ public class ChatPage extends Page {
             "list_skills", "load_skill",
             "list_mcps", "create_mcp", "delete_mcp",
             "task_complete",
+            "task_create", "task_status", "task_list", "task_update",
             "list_plugins", "enable_plugin", "disable_plugin",
             "create_persona", "list_personas", "delete_persona",
             "mem_list", "mem_read", "mem_search", "mem_write", "mem_update", "mem_delete", "mem_stats",
@@ -1776,6 +1784,8 @@ public class ChatPage extends Page {
                     + "请立刻直接给出最终回答正文，不要再展开冗长推理。）";
 
     private void runTurn(String contHint, ConvStore.Msg reuse) {
+        // 同步「当前会话」给工具层：task_* 工具据此定位本会话的活动任务
+        LocalTools.ctxConvId = (conv == null) ? "" : conv.id;
         if (conv == null) return;
         working = true;  // 任一模型调用轮次（含重试/续写/工具后续轮）都属工作循环
         final Prefs p = Prefs.get(act);
@@ -2514,6 +2524,15 @@ public class ChatPage extends Page {
                                             call.args == null || call.args.trim().isEmpty() ? "{}" : call.args);
                                     taskCompleteSummary[0] = a.optString("summary", "无摘要");
                                 } catch (Exception ignored) { taskCompleteSummary[0] = resultText; }
+                                // 与任务层强一致：模型宣告完成时，自动把当前任务全部步骤置为完成
+                                try {
+                                    TaskStore.Task _ct = TaskStore.active(App.inst,
+                                            conv == null ? "" : conv.id);
+                                    if (_ct != null && !TaskStore.ST_DONE.equals(_ct.status)) {
+                                        TaskStore.completeAll(_ct);
+                                        TaskStore.saveAll(App.inst, TaskStore.list(App.inst));
+                                    }
+                                } catch (Throwable ignored) {}
                                 hasTaskComplete[0] = true;
                                 taskDone[0] = true;
                             }

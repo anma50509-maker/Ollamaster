@@ -13,6 +13,9 @@ import java.util.concurrent.TimeUnit;
 
 public class LocalTools {
 
+    /** 当前会话 id：由 ChatPage 每轮 runTurn 前写入，供 task_* 工具定位「当前任务」。仅 UI 线程读写。 */
+    public static volatile String ctxConvId = "";
+
     public static JSONArray specs() {
         JSONArray out = new JSONArray();
         try {
@@ -58,6 +61,22 @@ public class LocalTools {
                     new String[]{"name"}, new String[]{"要删除的服务器名称"}, new String[]{"name"}));
             out.put(fn2("task_complete", "标记任务已完成，传入完成摘要。调用后停止工具循环",
                     new String[]{"summary"}, new String[]{"任务完成摘要，简述做了什么、结果如何"}, new String[]{"summary"}));
+            out.put(fn2("task_create", "创建一个多步骤任务并拆解为步骤（持久化保存，可跨轮次/跨重启跟踪进度）。同一会话同时只允许一个未结束任务",
+                    new String[]{"title", "description", "steps"},
+                    new String[]{"任务标题", "任务说明（可选）",
+                            "步骤列表：JSON 数组，如 [\"调研需求\",\"编写代码\",\"测试\"]，或 [{\"name\":\"步骤\",\"toolName\":\"可选工具\"}]；也支持纯文本按行拆解"},
+                    new String[]{"title"}));
+            out.put(fn2("task_status", "查看当前/指定任务的详情（状态、进度、步骤标记）",
+                    new String[]{"task_id"}, new String[]{"任务 id，留空=当前活动任务"}, null));
+            out.put(fn2("task_list", "列出所有任务及其状态与进度",
+                    new String[]{}, new String[]{}, null));
+            out.put(fn2("task_update", "修改任务或步骤。action 取值：add_step / remove_step / update_step / rename / set_status / advance（把当前步标记完成并推进下一步）/ complete / delete / pause / resume",
+                    new String[]{"action", "task_id", "step_index", "name", "tool_name", "tool_args", "result", "new_title", "status"},
+                    new String[]{"操作类型（必填）", "任务 id，留空=当前活动任务",
+                            "步骤序号（从 1 开始）", "步骤名称", "该步骤预设工具名", "预设工具参数(JSON字符串)",
+                            "步骤执行结果摘要", "重命名时的新标题",
+                            "set_status 时的步骤状态：COMPLETED/FAILED/SKIPPED/PENDING/RUNNING"},
+                    new String[]{"action"}));
             out.put(fn2("install_plugin", "安装或更新一个热插拔插件。插件可以定义自定义工具、自定义UI页面、自定义技能和人设卡，安装后立即生效。同名（同id）覆盖",
                     new String[]{"json"},
                     new String[]{"插件 JSON 定义，包含 id/name/desc/tools[]/pages[]/skills[]/personas[] 等字段"},
@@ -249,6 +268,7 @@ public class LocalTools {
             case "web_fetch": case "web_open":
             case "create_skill": case "delete_skill": case "list_skills": case "load_skill":
             case "create_mcp": case "list_mcps": case "delete_mcp": case "task_complete":
+            case "task_create": case "task_status": case "task_list": case "task_update":
             case "install_plugin": case "uninstall_plugin":
             case "list_plugins": case "enable_plugin": case "disable_plugin":
             case "create_persona": case "list_personas": case "delete_persona":
@@ -289,6 +309,10 @@ public class LocalTools {
             case "list_mcps": return listMcps();
             case "delete_mcp": return deleteMcp(args);
             case "task_complete": return "任务已完成：" + args.optString("summary", "无摘要");
+            case "task_create": return TaskStore.toolCreate(App.inst, ctxConvId, args);
+            case "task_status": return TaskStore.toolStatus(App.inst, ctxConvId, args.optString("task_id", ""));
+            case "task_list": return TaskStore.toolList(App.inst);
+            case "task_update": return TaskStore.toolUpdate(App.inst, ctxConvId, args);
             case "install_plugin": return installPlugin(args);
             case "uninstall_plugin": return uninstallPlugin(args);
             case "list_plugins": return listPlugins();
