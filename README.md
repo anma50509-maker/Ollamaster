@@ -99,7 +99,7 @@ zip 打包对齐 → apksigner 签名验证。产物输出为 `Ollamaster.apk`�
 
 ```
 source/
-├── src/                  # Java 源码（com.ollamaster 包，39 个文件）
+├── src/                  # Java 源码（com.ollamaster 包，43 个文件）
 ├── res/                  # Android 资源
 ├── docs/                 # 设计文档
 ├── AndroidManifest.xml   # 应用清单

@@ -1,6 +1,6 @@
 # Ollamaster 架构分析（v1.9.12，2026-10 更新）
 
-> 本文基于 source/src/com/ollamaster/ 当前源码（39 个 Java 文件，共 16823 行）
+> 本文基于 source/src/com/ollamaster/ 当前源码（43 个 Java 文件，共 20737 行）
 > 结合主流 Agent 框架（LangGraph / CrewAI / AutoGen）的设计理念进行对照分析。
 
 ---
@@ -27,7 +27,7 @@ Ollamaster 是纯 Java 零依赖手写的 Android AI 对话应用，核心不是
 - `runTurn()` — 每轮"模型一轮 + 工具执行 + 再触发"的主循环
 - `toolSpecsIfAny()` — 按编辑模式组装工具 Schema（三层合并）
 - `execToolsThenContinue()` — 工具执行与自动续循环
-- `apiMessages()` — 消息历史组装 + token 预算控制 + 摘要
+- `apiMessages()` — 消息历史组装（完整透传 + 工具调用链一致性修复）
 
 **协议层**
 - `Cloud.java` — OpenAI 兼容 /chat/completions 流式；`isOllamaNative()` 检测
@@ -200,12 +200,13 @@ LocalTools 约 50 个内置工具，按域划分：
 
 ### 优点
 
-1. **高集成密度**：39 个文件 16823 行覆盖了对话引擎、Agent 循环、浏览器自动化、
+1. **高集成密度**：43 个文件 20737 行覆盖了对话引擎、Agent 循环、浏览器自动化、
    MCP 客户端、插件系统、记忆库、TTS、密钥池——功能密度极高
-2. **零依赖纯 Java**：不依赖 Gson/OkHttp/Kotlin 协程，全手写，APK 极小（约 238KB）
+2. **零依赖纯 Java**：不依赖 Gson/OkHttp/Kotlin 协程，全手写，APK 极小（约 293KB）
 3. **协议层健壮**：双协议（OpenAI 兼容 + Ollama 原生）+ isOllamaNative 自动绕开
    转换层；tool_calls 按 index 增量聚合兼容各种网关
-4. **上下文管理成体系**：token 预算 + 摘要 + 工具结果截断 + 调用链一致性修复，四层防线
+4. **上下文管理成体系**：完整历史透传 + 工具结果截断 + 调用链一致性修复，三层防线
+   （v1.9.12 起移除 token 预算裁剪与上下文条数硬截断，长度交由模型/服务端默认处理）
 5. **工具触发哲学正确**：系统提示注入 Agent 循环规范 + 环境感知，让模型自觉完成任务
 6. **可扩展性**：插件热插拔 + MCP 标准协议，能力边界开放
 
@@ -229,7 +230,7 @@ LocalTools 约 50 个内置工具，按域划分：
 3. latch.await 加超时（如 120s），超时工具结果写 [超时]，回合继续而非挂死
 4. 引入「任务阶段」注入：把单 Agent 循环升级为轻量状态机（plan→act→verify→done），
    阶段写回消息供模型参考，兼顾可控性与零配置
-5. 单元测试：至少为 JsonFix、apiMessages 的一致性修复、token 预算裁剪写测试
+5. 单元测试：至少为 JsonFix、apiMessages 的一致性修复、工具调用链修复写测试
 6. ~~子 Agent（subagent）~~ **已完成（v1.9.4）**：见 `TEAM_ARCHITECTURE.md` 第十/十一章——L2 子 Agent + L3 团队编排均落地，论文依据见 `MULTI_AGENT_RESEARCH.md`
 
 ---
