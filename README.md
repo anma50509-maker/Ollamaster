@@ -2,7 +2,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/version-1.9.3-blue)](AndroidManifest.xml)
+[![Version](https://img.shields.io/badge/version-1.9.12-blue)](AndroidManifest.xml)
 [![官网](https://img.shields.io/badge/%E5%AE%98%E7%BD%91-anma50509--maker.github.io-gold)](https://anma50509-maker.github.io/)
 [![Platform](https://img.shields.io/badge/platform-Android%208.0%2B-green)](#)
 [![License](https://img.shields.io/badge/license-MIT-orange)](LICENSE)
@@ -32,13 +32,14 @@
 - 🛠 **内置工作台**：代码编辑、终端、浏览器、会话管理一应俱全
 - 🎚 **模型切换**：多模型一键切换，对话参数全部交由模型/服务端默认值
 - 🧮 **完整历史透传**：不做 Token 预算裁剪与摘要压缩，上下文长度交由模型默认处理
+- 🎛 **上下文与能力开关组**：记忆自动注入（含注入条数）、选择性目标注入、目标清单压缩总结、任务规划、子 Agent、团队协作，共 7 项一键开关
 - 💭 **思考链开关**：可强制开启/关闭模型推理过程，并按需回传精简思考
 - 💾 **会话持久化**：多模型消息序列化存储，随时续聊
 
 ## 📦 版本信息
 
 - versionName: **1.9.12**
-- versionCode: **26**
+- versionCode: **36**
 - minSdk: **26** (Android 8.0) · targetSdk: **35**
 
 ## 🏗 架构速览

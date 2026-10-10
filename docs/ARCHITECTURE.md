@@ -1,4 +1,4 @@
-# Ollamaster 架构分析（v1.9.4，2026-10 更新）
+# Ollamaster 架构分析（v1.9.12，2026-10 更新）
 
 > 本文基于 source/src/com/ollamaster/ 当前源码（39 个 Java 文件，共 16823 行）
 > 结合主流 Agent 框架（LangGraph / CrewAI / AutoGen）的设计理念进行对照分析。

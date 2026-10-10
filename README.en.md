@@ -2,7 +2,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/version-1.9.2-blue)](AndroidManifest.xml)
+[![Version](https://img.shields.io/badge/version-1.9.12-blue)](AndroidManifest.xml)
 [![Platform](https://img.shields.io/badge/platform-Android%208.0%2B-green)](#)
 [![License](https://img.shields.io/badge/license-MIT-orange)](LICENSE)
 [![Language](https://img.shields.io/badge/language-Java-4e8ee8)](#)
@@ -29,12 +29,14 @@ featuring an Agent tool loop, hot-pluggable plugin system, MCP client, browser a
 - 🔊 **Text-to-speech (TTS)**: Edge free / HTTP API dual channels, auto-read replies
 - 🎨 **Flat vector icons**: emoji replaced with a unified Material Design icon set, theme-tinted
 - 🛠 **Built-in workbench**: Code editor, terminal, browser, and conversation management
+- 🎚 **Context & capability toggles**: memory auto-injection (with count), selective goal injection, goal-list compression, task planning, sub-agent, team collaboration — 7 switches
+- 🧮 **Full history passthrough**: no token-budget trimming or summary compression; context length left to model defaults
 - 💾 **Conversation persistence**: Multi-model message serialization for seamless resume
 
 ## 📦 Version Info
 
 - versionName: **1.9.12**
-- versionCode: **26**
+- versionCode: **36**
 - minSdk: **26** (Android 8.0) · targetSdk: **35**
 
 ## 🏗 Architecture Overview
