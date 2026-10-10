@@ -1,4 +1,4 @@
-# Ollamaster 架构分析（v1.9.2，2026-09 勘察）
+# Ollamaster 架构分析（v1.9.4，2026-10 更新）
 
 > 本文基于 source/src/com/ollamaster/ 当前源码（39 个 Java 文件，共 16823 行）
 > 结合主流 Agent 框架（LangGraph / CrewAI / AutoGen）的设计理念进行对照分析。
@@ -107,13 +107,11 @@ Ollamaster 是纯 Java 零依赖手写的 Android AI 对话应用，核心不是
 
 ### 4. 上下文管理 apiMessages()
 
-三层防线：
+现行策略（对话参数已移除，上下文长度交由模型/服务端默认处理）：
 
-1. **Token 预算**（maxPromptTokens）：先截断早期 tool 结果（保留 500 字符），
-   再从最新往旧计算，超预算丢弃最旧消息，留最小 4096 token 保证近期上下文
-2. **字符阈值摘要**（summaryKb）：超 16KB 触发 ensureSummary()，前端对话压缩为
-   系统消息「【此前对话摘要】」注入
-3. **工具调用链一致性修复**：两步修真——assistant 的 tool_calls 只保留有精确
+1. **完整历史透传**：不再做 Token 预算裁剪、不做上下文条数硬截断、
+   不做字符阈值摘要压缩（摘要仅用于会话标题等旁路用途）
+2. **工具调用链一致性修复**：两步修真——assistant 的 tool_calls 只保留有精确
    tool 响应的调用；删除 tool_call_id 找不到精确匹配的孤立 tool 消息
    （修复 API 400 unknown tool_call_id）
 
@@ -145,6 +143,8 @@ LocalTools 约 50 个内置工具，按域划分：
 | 设置 | list_settings / get_setting / set_setting |
 | 密钥池 | key_pool_list / add / remove / update |
 | 收尾 | task_complete / rename_conv / load_tool_spec |
+| 子 Agent | subagent_run |
+| 团队协作 | team_run（Agent 工作群聊：chat/pipeline/hierarchical/debate）|
 
 亮点：**浏览器自动化 + 视觉闭环**——AI 可截图 → web_vision 理解 → 按坐标继续点击，
 形成「看图→点击」自主网页操作能力，配合反爬虫指纹对抗。
@@ -217,7 +217,7 @@ LocalTools 约 50 个内置工具，按域划分：
 3. **无单元测试**：纯手写无测试，回归靠构建验证与人工
 4. **工具调用无超时上限**：依赖 execToolsThenContinue 的 latch.await() 无超时，
    MCP 卡死可能 hang 住整个回合
-5. **无多 Agent/子任务拆分**：复杂任务单线执行，没有并行分支
+5. ~~无多 Agent/子任务拆分~~ **已补（v1.9.4）**：L2 `subagent_run`（独立上下文子 Agent）+ L3 `team_run`（多角色工作群聊，四种编排模式）
 6. **无可观测性**：仅有对话日志面板，没有执行轨迹（哪个工具→结果→决策依据）回放
 7. **重试/续写靠启发式常量**：contDepth/3、重试指数退避等硬编码，无配置化
 
@@ -230,8 +230,7 @@ LocalTools 约 50 个内置工具，按域划分：
 4. 引入「任务阶段」注入：把单 Agent 循环升级为轻量状态机（plan→act→verify→done），
    阶段写回消息供模型参考，兼顾可控性与零配置
 5. 单元测试：至少为 JsonFix、apiMessages 的一致性修复、token 预算裁剪写测试
-6. 子 Agent（subagent）：把"浏览器操作/长文本写作"包装为可调用的 subagent 工具，
-   嵌套执行复杂任务
+6. ~~子 Agent（subagent）~~ **已完成（v1.9.4）**：见 `TEAM_ARCHITECTURE.md` 第十/十一章——L2 子 Agent + L3 团队编排均落地，论文依据见 `MULTI_AGENT_RESEARCH.md`
 
 ---
 

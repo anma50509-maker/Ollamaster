@@ -68,26 +68,6 @@ public class Prefs {
     public boolean streamDiag() { return sp.getBoolean("stream_diag", false); }
     public void streamDiag(boolean v) { sp.edit().putBoolean("stream_diag", v).apply(); }
 
-    public float temperature() { return sp.getFloat("temperature", 0.7f); }
-    public void temperature(float v) { sp.edit().putFloat("temperature", v).apply(); }
-
-    public float topP() { return sp.getFloat("topP", 0.9f); }
-    public void topP(float v) { sp.edit().putFloat("topP", v).apply(); }
-
-    public int maxTokens() { return sp.getInt("maxTokens", 2048); }
-    public void maxTokens(int v) { sp.edit().putInt("maxTokens", v).apply(); }
-
-    public int ctxMsgs() { return sp.getInt("ctxMsgs", 12); }
-    public void ctxMsgs(int v) { sp.edit().putInt("ctxMsgs", v).apply(); }
-
-    public int summaryKb() { return sp.getInt("summaryKb", 96); }
-    public void summaryKb(int v) { sp.edit().putInt("summaryKb", v).apply(); }
-
-    /** 最大提示词 token 预算（含系统提示、历史消息、工具 Schema、工具结果）。
-     *  超额时自动摘要/裁剪旧消息。0=不限制（默认 0，不限制；建议云端模型设 80000-120000） */
-    public int maxPromptTokens() { return sp.getInt("maxPromptTokens", 0); }
-    public void maxPromptTokens(int v) { sp.edit().putInt("maxPromptTokens", v).apply(); }
-
     public String sysPrompt() { return sp.getString("sysPrompt", ""); }
     public void sysPrompt(String v) { sp.edit().putString("sysPrompt", v).apply(); }
 
@@ -190,6 +170,35 @@ public class Prefs {
 
     public String apiKeyPool() { return sp.getString("apiKeyPool", "[]"); }
     public void apiKeyPool(String v) { sp.edit().putString("apiKeyPool", v).apply(); }
+
+    // ===== 【上下文注入与能力开关】=====
+    /** 记忆自动注入：系统提示附带「最近记忆摘要」，开场即知长期沉淀（默认开） */
+    public boolean memInject() { return sp.getBoolean("memInject", true); }
+    public void memInject(boolean v) { sp.edit().putBoolean("memInject", v).apply(); }
+
+    /** 记忆注入条数：取最近 N 条记忆的「分类+标题」，默认 5 */
+    public int memInjectTop() { return sp.getInt("memInjectTop", 5); }
+    public void memInjectTop(int v) { sp.edit().putInt("memInjectTop", Math.max(1, v)).apply(); }
+
+    /** 选择性目标注入：仅当本轮提问与任务相关时才注入任务清单，避免闲聊被任务上下文污染（默认开） */
+    public boolean targetInject() { return sp.getBoolean("targetInject", true); }
+    public void targetInject(boolean v) { sp.edit().putBoolean("targetInject", v).apply(); }
+
+    /** 目标清单压缩总结：把长步骤列表压成「总进度+当前步+待办」摘要，显著省 token（默认开） */
+    public boolean targetCompress() { return sp.getBoolean("targetCompress", true); }
+    public void targetCompress(boolean v) { sp.edit().putBoolean("targetCompress", v).apply(); }
+
+    /** 任务规划开关：允许 AI 自主 task_create 拆解多步骤任务并持久化跟踪（默认开） */
+    public boolean taskPlanning() { return sp.getBoolean("taskPlanning", true); }
+    public void taskPlanning(boolean v) { sp.edit().putBoolean("taskPlanning", v).apply(); }
+
+    /** 子 Agent 功能开关：关闭后 subagent_run 对模型不可见、即便被调用也直接拒绝（默认开） */
+    public boolean subAgentEnabled() { return sp.getBoolean("subAgentEnabled", true); }
+    public void subAgentEnabled(boolean v) { sp.edit().putBoolean("subAgentEnabled", v).apply(); }
+
+    /** 团队协作开关（L3）：关闭后 team_run 对模型不可见、即便被调用也直接拒绝（默认开） */
+    public boolean teamEnabled() { return sp.getBoolean("teamEnabled", true); }
+    public void teamEnabled(boolean v) { sp.edit().putBoolean("teamEnabled", v).apply(); }
 
     public String workspace() { return workspace(App.inst); }
 

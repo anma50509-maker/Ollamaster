@@ -124,8 +124,8 @@ public class LocalTools {
         out.put(fn2("list_settings", "列出应用所有可配置设置项及其当前值（AI 自行配置入口）",
                 null, null, null));
         out.put(fn2("get_setting", "读取单个设置项的当前值",
-                new String[]{"key"}, new String[]{"设置键名，如 temperature / ttsMode / autoTts"}, new String[]{"key"}));
-        out.put(fn2("set_setting", "修改应用设置（AI 自行配置入口）。支持键：host,hosts,port,timeoutSec,retryMax,editMode,themeName,customTheme,cBg,cAccent,cText,fontScale,stream,showThink,streamDiag,temperature,topP,maxTokens,ctxMsgs,summaryKb,sysPrompt,cloudMode,cloudUrl,cloudKey,cloudModels,activeModel,activeCloudModel,ttsMode,ttsUrl,ttsKey,ttsModel,ttsVoice,ttsSpeed,autoTts,activeKeyIndex,apiKeyPool,workspace,imgEnabled,imgUrl,imgKey,imgModel,imgSize,imgStyle,imgDir,imgVisionModel,visionMode,visionUrl,visionKey,visionModelId,autoTitle",
+                new String[]{"key"}, new String[]{"设置键名，如 stream / ttsMode / autoTts"}, new String[]{"key"}));
+        out.put(fn2("set_setting", "修改应用设置（AI 自行配置入口）。支持键：host,hosts,port,timeoutSec,retryMax,editMode,themeName,customTheme,cBg,cAccent,cText,fontScale,stream,showThink,streamDiag,sysPrompt,cloudMode,cloudUrl,cloudKey,cloudModels,activeModel,activeCloudModel,ttsMode,ttsUrl,ttsKey,ttsModel,ttsVoice,ttsSpeed,autoTts,activeKeyIndex,apiKeyPool,workspace,imgEnabled,imgUrl,imgKey,imgModel,imgSize,imgStyle,imgDir,imgVisionModel,visionMode,visionUrl,visionKey,visionModelId,autoTitle,memInject,memInjectTop,targetInject,targetCompress,taskPlanning,subAgentEnabled,teamEnabled",
                 new String[]{"key", "value"},
                 new String[]{"设置键名（见描述）", "设置值：布尔用 true/false，数字用数值，字符串直接填写"},
                 new String[]{"key", "value"}));
@@ -191,6 +191,33 @@ public class LocalTools {
                     new String[]{"name"},
                     new String[]{"工具名称（如 browser_click、mem_write、key_pool_add 等）"},
                     new String[]{"name"}));
+
+            // 【L2 子 Agent】委派子任务给独立上下文的执行体，仅回传结论报告，避免主上下文被中间过程撑爆
+            out.put(fn2("subagent_run",
+                    "把一个子任务委派给「独立上下文的子 Agent」执行并只返回结论报告。适合：多步骤调研/批量文件处理/长命令分析等会产生大量中间输出的任务。子 Agent 自行完成多轮工具往返，主会话上下文只收到精简报告。",
+                    new String[]{"task", "context", "tools", "max_rounds", "model"},
+                    new String[]{
+                            "子任务描述（必填，尽量具体：目标、范围、期望产出）",
+                            "可选，子 Agent 需要的已知上下文/约束（如文件路径、已有结论）",
+                            "可选，限定子 Agent 可用的工具名（逗号分隔，如 read_file,run_command）；留空用默认白名单",
+                            "可选，子任务最多允许的工具往返轮数（默认 6，上限 12）",
+                            "可选，指定子 Agent 使用的模型名；留空沿用当前模型"},
+                    new String[]{"task"}));
+
+            // 【L3 团队编排】多角色工作群聊：协调者/设计者/执行者/审查者轮流发言，主会话只收纪要
+            out.put(fn2("team_run",
+                    "组建一个「多角色 AI 工作群聊」，让若干角色就目标轮流发言、互相补位与挑错，最后汇总成一份结构化交付物（结论/分工与产出/风险/下一步）。适合：需要多视角评审、方案设计、复杂拆解的任务。主会话只收到纪要，中间过程不占用上下文。",
+                    new String[]{"task", "context", "mode", "roles", "rounds", "tools", "max_rounds", "model"},
+                    new String[]{
+                            "团队要协作完成的目标（必填，尽量具体）",
+                            "可选，团队已知的背景/约束/已有结论",
+                            "可选，编排模式：chat=圆桌群聊(默认) / pipeline=串行流水线 / hierarchical=层级分派 / debate=评审辩论",
+                            "可选，自定义角色表，格式 `名称:职责;名称:职责`（2~5 个，留空用默认四人团队）",
+                            "可选，群聊轮次（chat/debate 有效，默认 1，上限 3）",
+                            "可选，角色可用的工具名（逗号分隔，仅限只读/产物类白名单）；留空用默认白名单",
+                            "可选，每个角色内部最多工具往返轮数（默认 4，上限 8）",
+                            "可选，团队使用的模型名；留空沿用当前模型"},
+                    new String[]{"task"}));
 
         } catch (Exception ignored) {}
         return out;
@@ -282,6 +309,8 @@ public class LocalTools {
             case "browser_click": case "browser_type": case "browser_scroll":
             case "browser_back": case "browser_eval": case "browser_screenshot":
             case "browser_ua": case "web_vision":
+            case "subagent_run":
+            case "team_run":
             case "image_generate": case "rename_conv": case "load_tool_spec":
                 return true;
             default:
@@ -351,6 +380,8 @@ public class LocalTools {
             case "web_vision": return webVision(args);
             case "image_generate": return imageGenerate(args);
             case "rename_conv": return renameConv(args);
+            case "subagent_run": return SubAgentRunner.toolRun(args);
+            case "team_run": return TeamOrchestrator.toolRun(args);
             case "load_tool_spec": return loadToolSpec(args);
             default: throw new Exception("未知工具: " + name);
         }
@@ -667,11 +698,6 @@ public class LocalTools {
         sb.append("stream = ").append(p.stream()).append("（流式输出）\n");
         sb.append("showThink = ").append(p.showThink()).append("（显示思考链）\n");
         sb.append("streamDiag = ").append(p.streamDiag()).append("\n");
-        sb.append("temperature = ").append(p.temperature()).append("\n");
-        sb.append("topP = ").append(p.topP()).append("\n");
-        sb.append("maxTokens = ").append(p.maxTokens()).append("\n");
-        sb.append("ctxMsgs = ").append(p.ctxMsgs()).append("\n");
-        sb.append("summaryKb = ").append(p.summaryKb()).append("\n");
         sb.append("sysPrompt = ").append(p.sysPrompt().isEmpty() ? "(空)" : p.sysPrompt()).append("\n");
         sb.append("cloudMode = ").append(p.cloudMode()).append("（云端模式）\n");
         sb.append("cloudUrl = ").append(p.cloudUrl()).append("\n");
@@ -689,6 +715,13 @@ public class LocalTools {
         sb.append("activeKeyIndex = ").append(p.activeKeyIndex()).append("\n");
         sb.append("apiKeyPool = ").append(maskApiKeyPool(p.apiKeyPool())).append("\n");
         sb.append("workspace = ").append(p.workspace()).append("\n");
+        sb.append("memInject = ").append(p.memInject()).append("（长期记忆自动注入系统提示）\n");
+        sb.append("memInjectTop = ").append(p.memInjectTop()).append("（注入最近 N 条记忆标题）\n");
+        sb.append("targetInject = ").append(p.targetInject()).append("（选择性目标注入：仅相关提问注入任务清单）\n");
+        sb.append("targetCompress = ").append(p.targetCompress()).append("（目标清单压缩总结）\n");
+        sb.append("subAgentEnabled = ").append(p.subAgentEnabled()).append("（子 Agent 功能开关）\n");
+        sb.append("teamEnabled = ").append(p.teamEnabled()).append("（团队协作 Agent 工作群聊开关）\n");
+        sb.append("taskPlanning = ").append(p.taskPlanning()).append("（任务规划：AI 自主拆解多步骤任务）\n");
         sb.append("imgEnabled = ").append(p.imgEnabled()).append("（生图 AI 开关）\n");
         sb.append("imgUrl = ").append(p.imgUrl()).append("\n");
         sb.append("imgKey = ").append(p.imgKey().isEmpty() ? "(未设置)" : "••••已设置").append("\n");
@@ -725,11 +758,6 @@ public class LocalTools {
             case "stream": return "stream = " + p.stream();
             case "showThink": return "showThink = " + p.showThink();
             case "streamDiag": return "streamDiag = " + p.streamDiag();
-            case "temperature": return "temperature = " + p.temperature();
-            case "topP": return "topP = " + p.topP();
-            case "maxTokens": return "maxTokens = " + p.maxTokens();
-            case "ctxMsgs": return "ctxMsgs = " + p.ctxMsgs();
-            case "summaryKb": return "summaryKb = " + p.summaryKb();
             case "sysPrompt": return "sysPrompt = " + (p.sysPrompt().isEmpty() ? "(空)" : p.sysPrompt());
             case "cloudMode": return "cloudMode = " + p.cloudMode();
             case "cloudUrl": return "cloudUrl = " + p.cloudUrl();
@@ -747,6 +775,13 @@ public class LocalTools {
             case "activeKeyIndex": return "activeKeyIndex = " + p.activeKeyIndex();
             case "apiKeyPool": return "apiKeyPool = " + maskApiKeyPool(p.apiKeyPool());
             case "workspace": return "workspace = " + p.workspace();
+            case "memInject": return "memInject = " + p.memInject();
+            case "memInjectTop": return "memInjectTop = " + p.memInjectTop();
+            case "targetInject": return "targetInject = " + p.targetInject();
+            case "targetCompress": return "targetCompress = " + p.targetCompress();
+            case "subAgentEnabled": return "subAgentEnabled = " + p.subAgentEnabled();
+            case "teamEnabled": return "teamEnabled = " + p.teamEnabled();
+            case "taskPlanning": return "taskPlanning = " + p.taskPlanning();
             case "imgEnabled": return "imgEnabled = " + p.imgEnabled();
             case "imgUrl": return "imgUrl = " + p.imgUrl();
             case "imgKey": return "imgKey = " + (p.imgKey().isEmpty() ? "(未设置)" : "••••已设置");
@@ -791,12 +826,15 @@ public class LocalTools {
             case "stream": p.stream(parseBool(v, "stream")); break;
             case "showThink": p.showThink(parseBool(v, "showThink")); break;
             case "streamDiag": p.streamDiag(parseBool(v, "streamDiag")); break;
-            case "temperature": p.temperature(parseFloat(v, "temperature")); break;
-            case "topP": p.topP(parseFloat(v, "topP")); break;
-            case "maxTokens": p.maxTokens(parseInt(v, "maxTokens")); break;
-            case "ctxMsgs": p.ctxMsgs(parseInt(v, "ctxMsgs")); break;
-            case "summaryKb": p.summaryKb(parseInt(v, "summaryKb")); break;
             case "sysPrompt": p.sysPrompt(v); break;
+            // 【上下文注入与能力开关】
+            case "memInject": p.memInject(parseBool(v, "memInject")); break;
+            case "memInjectTop": p.memInjectTop(parseInt(v, "memInjectTop")); break;
+            case "targetInject": p.targetInject(parseBool(v, "targetInject")); break;
+            case "targetCompress": p.targetCompress(parseBool(v, "targetCompress")); break;
+            case "subAgentEnabled": p.subAgentEnabled(parseBool(v, "subAgentEnabled")); break;
+            case "teamEnabled": p.teamEnabled(parseBool(v, "teamEnabled")); break;
+            case "taskPlanning": p.taskPlanning(parseBool(v, "taskPlanning")); break;
             case "cloudMode": p.cloudMode(parseBool(v, "cloudMode")); break;
             case "cloudUrl": p.cloudUrl(v); break;
             case "cloudKey": p.cloudKey(v); break;
@@ -1601,7 +1639,6 @@ public class LocalTools {
             JSONObject body = new JSONObject();
             body.put("model", visionModel);
             body.put("stream", false);
-            body.put("max_tokens", 512);
             JSONObject c1 = new JSONObject(); c1.put("type", "text"); c1.put("text", q);
             JSONObject c2 = new JSONObject(); c2.put("type", "image_url");
             JSONObject iu = new JSONObject(); iu.put("url", "data:image/png;base64," + b64);

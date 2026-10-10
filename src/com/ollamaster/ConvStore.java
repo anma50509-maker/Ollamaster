@@ -17,6 +17,46 @@ import java.util.Locale;
 public class ConvStore {
     public static class ToolCall {
         public String id = "", name = "", args = "{}";
+
+        /**
+         * 服务商附加字段的原样透传袋（如 Gemini / Vertex 的
+         * {@code extra_content.google.thought_signature}）。
+         *
+         * 【为什么必须有】Gemini 要求 assistant 回合的每个 functionCall 都把上一轮返回的
+         * thought_signature 原封不动带回来，否则下一个请求直接 400
+         * （"Function call is missing a thought_signature in functionCall parts"）。
+         * 客户端只要重建成「id/type/function」的标准 OpenAI 形状就会把它丢掉，
+         * 于是对话进行到第二次工具调用必然失败。
+         * 做法：不枚举字段名，而是**除标准字段外的一切键都保留并原样回传**，
+         * 这样任何服务商新增的旁路数据都不会再被吃掉。
+         */
+        public org.json.JSONObject extra;
+
+        /** 从服务商返回的 tool_call 对象里收集非标准字段（id/type/function/index 之外） */
+        public static org.json.JSONObject extrasOf(org.json.JSONObject src) {
+            if (src == null) return null;
+            org.json.JSONObject ex = null;
+            java.util.Iterator<String> it = src.keys();
+            while (it.hasNext()) {
+                String k = it.next();
+                if ("id".equals(k) || "type".equals(k) || "function".equals(k) || "index".equals(k)) continue;
+                Object v = src.opt(k);
+                if (v == null || org.json.JSONObject.NULL.equals(v)) continue;
+                if (ex == null) ex = new org.json.JSONObject();
+                try { ex.put(k, v); } catch (Exception ignored) {}
+            }
+            return ex;
+        }
+
+        /** 把透传袋里的字段写回待发送的对象（重名以透传袋为准） */
+        public static void writeExtras(org.json.JSONObject dst, org.json.JSONObject extras) {
+            if (dst == null || extras == null) return;
+            java.util.Iterator<String> it = extras.keys();
+            while (it.hasNext()) {
+                String k = it.next();
+                try { dst.put(k, extras.opt(k)); } catch (Exception ignored) {}
+            }
+        }
     }
 
     public static class Msg {
@@ -152,6 +192,8 @@ public class ConvStore {
                             fn.put("name", t.name);
                             fn.put("arguments", t.args);
                             f.put("function", fn);
+                            // 服务商附加字段（Gemini thought_signature 等）必须原样回传，否则严格端点 400
+                            ToolCall.writeExtras(f, t.extra);
                             tc.put(f);
                         }
                         o.put("tool_calls", tc);
@@ -681,6 +723,7 @@ public class ConvStore {
                             tc.id = t.optString("id");
                             tc.name = t.optString("name");
                             tc.args = t.optString("args", "{}");
+                            tc.extra = t.optJSONObject("extra");   // 服务商附加字段（如 thought_signature）
                             mm.tools.add(tc);
                         }
                     }
@@ -788,6 +831,7 @@ public class ConvStore {
                         t2.put("id", t.id);
                         t2.put("name", t.name);
                         t2.put("args", t.args);
+                        if (t.extra != null && t.extra.length() > 0) t2.put("extra", t.extra);
                         tl.put(t2);
                     }
                     o.put("tools", tl);

@@ -13,3 +13,10 @@ dex/
 
 # 密钥（位于源码仓库之外，此处兜底防误提交）
 *.jks
+
+# 历史备份与临时补丁（源码仓库之外，不入库）
+legacy/
+*.bak
+*.bak_*
+*.anchorfix.bak
+patch_*.py

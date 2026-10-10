@@ -178,7 +178,7 @@ public class ChatPage extends Page {
         msgList.setTranscriptMode(ListView.TRANSCRIPT_MODE_NORMAL);
         msgList.setSelector(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
         int ph = Ui.dpi(act, 10);
-        msgList.setPadding(ph, Ui.dpi(act, 4), ph, Ui.dpi(act, 8));
+        msgList.setPadding(ph, Ui.dpi(act, 4), ph, Ui.dpi(act, 14));
         msgAdapter = bubbles.adapter();
         msgList.setAdapter(msgAdapter);
 
@@ -211,8 +211,145 @@ public class ChatPage extends Page {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         root.addView(fl, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        activityBar = buildActivityBar();
+        root.addView(activityBar);
         root.addView(buildComposer());
+        // 多智能体可视化的实时通道：后台运行轨迹一变就刷新活动条
+        AgentActivity.setListener(() -> Ui.H.post(this::refreshActivityBar));
         return root;
+    }
+
+    // ==================== 子 Agent / 团队群聊：实时活动条 ====================
+
+    private LinearLayout activityBar;
+    private TextView actAvatar, actTitle, actProgress, actPhase;
+    private View actBarFill;
+    private boolean activityTicking = false;
+
+    /** 活动条：谁在发言 / 第几步 / 当前动作 / 已耗时（仅在多智能体运行中出现） */
+    private LinearLayout buildActivityBar() {
+        LinearLayout bar = new LinearLayout(act);
+        bar.setOrientation(LinearLayout.VERTICAL);
+        bar.setVisibility(View.GONE);
+        bar.setBackground(Ui.stroke(t.surfaceAlt, t.border, Ui.dpi(act, 13), Ui.dpi(act, 0.7f)));
+        int pad = Ui.dpi(act, 11);
+        bar.setPadding(pad, Ui.dpi(act, 8), pad, Ui.dpi(act, 8));
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        blp.leftMargin = Ui.dpi(act, 12);
+        blp.rightMargin = Ui.dpi(act, 12);
+        blp.bottomMargin = Ui.dpi(act, 6);
+        bar.setLayoutParams(blp);
+
+        LinearLayout row = new LinearLayout(act);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+
+        actAvatar = new TextView(act);
+        actAvatar.setGravity(Gravity.CENTER);
+        actAvatar.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 10.5f));
+        row.addView(actAvatar, new LinearLayout.LayoutParams(Ui.dpi(act, 20), Ui.dpi(act, 20)));
+
+        actTitle = new TextView(act);
+        actTitle.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 12.5f));
+        actTitle.setTextColor(t.textPri);
+        actTitle.setSingleLine(true);
+        actTitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        tlp.leftMargin = Ui.dpi(act, 8);
+        row.addView(actTitle, tlp);
+
+        actProgress = new TextView(act);
+        actProgress.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 11));
+        actProgress.setTextColor(t.textSec);
+        actProgress.setSingleLine(true);
+        row.addView(actProgress);
+        bar.addView(row);
+
+        LinearLayout track = new LinearLayout(act);
+        track.setOrientation(LinearLayout.HORIZONTAL);
+        track.setBackground(Ui.round(t.alpha(t.textPri, 0.09f), Ui.dpi(act, 999)));
+        actBarFill = new View(act);
+        actBarFill.setBackground(Ui.round(t.accent, Ui.dpi(act, 999)));
+        track.addView(actBarFill, new LinearLayout.LayoutParams(0, Ui.dpi(act, 3), 0.05f));
+        LinearLayout.LayoutParams glp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, Ui.dpi(act, 3));
+        glp.topMargin = Ui.dpi(act, 8);
+        bar.addView(track, glp);
+
+        actPhase = new TextView(act);
+        actPhase.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 10.5f));
+        actPhase.setTextColor(t.textSec);
+        actPhase.setSingleLine(true);
+        actPhase.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        actPhase.setTypeface(Ui.mono());
+        LinearLayout.LayoutParams plp2 = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        plp2.topMargin = Ui.dpi(act, 6);
+        bar.addView(actPhase, plp2);
+        return bar;
+    }
+
+    /** 角色配色：按角色名稳定取色，同一角色在任何地方颜色一致 */
+    private static final int[] ROLE_COLORS_LIGHT = {
+            0xFF534AB7, 0xFF185FA5, 0xFF0F6E56, 0xFFA32D2D, 0xFF854F0B};
+    private static final int[] ROLE_COLORS_DARK = {
+            0xFFAFA9EC, 0xFF85B7EB, 0xFF5DCAA5, 0xFFF09595, 0xFFFAC775};
+
+    static int rolePalette(String role, boolean light) {
+        int i = Math.abs(role == null ? 0 : role.hashCode()) % 5;
+        return (light ? ROLE_COLORS_LIGHT : ROLE_COLORS_DARK)[i];
+    }
+
+    /** 供 ChatBubbles 渲染群聊卡片使用 */
+    int roleColor(String role) { return rolePalette(role, t.light == 1); }
+
+    private void refreshActivityBar() {
+        if (activityBar == null || act == null) return;
+        AgentActivity.Run r = AgentActivity.active();
+        if (r == null) {
+            activityBar.setVisibility(View.GONE);
+            activityTicking = false;
+            return;
+        }
+        boolean team = "team".equals(r.kind);
+        String role = r.currentRole == null || r.currentRole.isEmpty()
+                ? (team ? "团队" : "子 Agent") : r.currentRole;
+        int color = roleColor(role);
+
+        actAvatar.setText(role.substring(0, 1));
+        actAvatar.setBackground(Ui.round(t.alpha(color, 0.16f), Ui.dpi(act, 999)));
+        actAvatar.setTextColor(color);
+
+        String phase = r.phase == null ? "" : r.phase;
+        actTitle.setText(team ? role + " 正在发言" : (role + " 运行中"));
+        actProgress.setText(r.done + " / " + (r.total <= 0 ? "?" : String.valueOf(r.total)));
+        float frac = r.total <= 0 ? 0.05f : Math.max(0.05f, Math.min(1f, r.done * 1f / r.total));
+        actBarFill.setLayoutParams(new LinearLayout.LayoutParams(0, Ui.dpi(act, 3), frac));
+        actPhase.setText((phase.isEmpty() ? "进行中" : phase)
+                + " · 已 " + String.format(java.util.Locale.US, "%.1f", r.elapsedMs() / 1000.0) + "s"
+                + (r.calls > 0 ? " · 模型调用 " + r.calls + " 次" : ""));
+
+        if (activityBar.getVisibility() != View.VISIBLE) activityBar.setVisibility(View.VISIBLE);
+        if (!activityTicking) {
+            activityTicking = true;
+            tickActivity();
+        }
+    }
+
+    /** 计时刷新：运行中每 500ms 更新耗时与进度 */
+    private void tickActivity() {
+        Ui.H.postDelayed(() -> {
+            if (!uiAlive() || activityBar == null) { activityTicking = false; return; }
+            AgentActivity.Run r = AgentActivity.active();
+            if (r == null) {
+                activityTicking = false;
+                activityBar.setVisibility(View.GONE);
+                return;
+            }
+            refreshActivityBar();
+        }, 500);
     }
 
     private View buildToolbar() {
@@ -332,14 +469,14 @@ public class ChatPage extends Page {
         chipsScroll.setVerticalScrollBarEnabled(false);
         LinearLayout chipsRow = new LinearLayout(act);
         chipsRow.setOrientation(LinearLayout.VERTICAL);
-        chipsRow.setGravity(Gravity.CENTER_HORIZONTAL);
         refreshEmptyChips(chipsRow);
-        chipsScroll.addView(chipsRow,
-                new ScrollView.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        LinearLayout clp = new LinearLayout(act);
-        clp.setGravity(Gravity.CENTER);
-        clp.addView(chipsScroll, new LinearLayout.LayoutParams(Ui.dpi(act, 300), Ui.dpi(act, 120)));
-        box.addView(clp);
+        chipsScroll.addView(chipsRow, new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        LinearLayout.LayoutParams gclp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, Ui.dpi(act, 140));
+        gclp.leftMargin = Ui.dpi(act, 28);
+        gclp.rightMargin = Ui.dpi(act, 28);
+        box.addView(chipsScroll, gclp);
         emptyChipsRow = chipsRow;
         return box;
     }
@@ -348,27 +485,53 @@ public class ChatPage extends Page {
 
     private void refreshEmptyChips(LinearLayout row) {
         row.removeAllViews();
+        // 两列等宽卡片网格：充分利用横向空间，末格为「全部人设」入口
+        java.util.List<String> labels = new java.util.ArrayList<>();
+        java.util.List<Runnable> acts = new java.util.ArrayList<>();
         int n = Math.min(5, personas.size());
         for (int i = 0; i < n; i++) {
             final Personas.P p = personas.get(i);
-            TextView c = Ui.chip(act, t, p.emoji + "  " + p.name, false);
-            c.setOnClickListener(v -> {
+            labels.add((p.emoji == null || p.emoji.isEmpty() ? "" : p.emoji + "  ") + p.name);
+            acts.add(() -> {
                 persona = p;
                 updateChips();
                 Ui.toast(act, "人设：" + p.name);
             });
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            lp.bottomMargin = Ui.dpi(act, 8);
-            row.addView(c, lp);
         }
-        // 入口：完整人设列表（新建/导入的人设卡都在里面）
-        TextView all = Ui.chip(act, t, "全部人设", false);
-        all.setOnClickListener(v -> dialogs.personaSheet());
-        LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        alp.bottomMargin = Ui.dpi(act, 8);
-        row.addView(all, alp);
+        labels.add("全部人设");
+        acts.add(() -> dialogs.personaSheet());
+
+        for (int i = 0; i < labels.size(); i += 2) {
+            LinearLayout line = new LinearLayout(act);
+            line.setOrientation(LinearLayout.HORIZONTAL);
+            for (int c = 0; c < 2; c++) {
+                final int idx = i + c;
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                        0, Ui.dpi(act, 34), 1f);
+                lp.bottomMargin = Ui.dpi(act, 7);
+                if (c == 0) lp.rightMargin = Ui.dpi(act, 7);
+                if (idx >= labels.size()) {
+                    line.addView(new View(act), lp);   // 占位，保持网格整齐
+                    continue;
+                }
+                final Runnable actn = acts.get(idx);
+                TextView cell = new TextView(act);
+                cell.setText(labels.get(idx));
+                cell.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 12f));
+                cell.setTextColor(t.textSec);
+                cell.setSingleLine(true);
+                cell.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                cell.setGravity(Gravity.CENTER_VERTICAL);
+                int hpad = Ui.dpi(act, 11);
+                cell.setPadding(hpad, 0, hpad, 0);
+                cell.setBackground(Ui.ripple(Ui.stroke(t.surfaceAlt, t.border,
+                        Ui.dpi(act, 11), Ui.dpi(act, 0.7f)), t.alpha(t.textPri, 0.12f)));
+                cell.setOnClickListener(v -> actn.run());
+                line.addView(cell, lp);
+            }
+            row.addView(line, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        }
     }
 
     /** 空状态快捷人设区刷新：仅当该区域可见时执行（新建/导入/删除人设后调用，避免新卡不显示） */
@@ -945,6 +1108,8 @@ public class ChatPage extends Page {
         String chipText = mShort;
         if (!provider.isEmpty()) chipText += " · " + provider;
         modelChip.setText(chipText);
+        modelChip.setMaxWidth(Ui.dpi(act, 172));
+        modelChip.setEllipsize(android.text.TextUtils.TruncateAt.END);
         modelChip.setCompoundDrawables(null, null, null, null);
         Icon.pinRight(modelChip, "chevronDown", 10);
         if (cloud) Icon.pinLeft(modelChip, "cloud", 11);
@@ -1120,7 +1285,10 @@ public class ChatPage extends Page {
          .append(p.sysPrompt()).append('\u0001')
          .append(withTools);
         // 【任务层】把当前任务渲染文本纳入指纹：仅在任务/步骤状态变化时改变，保护前缀缓存
-        if (withTools && conv != null) k.append('\u0001').append(TaskStore.promptBlock(act, conv.id));
+        // 选择性注入：只有本轮提问与任务相关时才纳入指纹，闲聊不占前缀
+        if (withTools && conv != null) k.append('\u0001').append(TaskStore.promptBlock(act, conv.id, lastUserText()));
+        // 【记忆层】长期记忆摘要纳入指纹（仅最近 N 条集合变化时改变，同样兼容前缀缓存）
+        if (withTools && p.memInject()) k.append('\u0001').append(MemoryStore.injectDigest(act, p.memInjectTop()));
         if (p.editMode()) {
             k.append('\u0001').append(Skills.enabledPrompt(act))
              .append('\u0001').append(Plugins.enabledSkillsPrompt(act));
@@ -1175,9 +1343,38 @@ public class ChatPage extends Page {
                     + "需要具体数量或清单时，调用 mem_stats / list_mcps / list_settings 按需获取，"
                     + "已知资源优先使用，避免重复探索。");
             // 【任务层】持久化任务上下文：让模型随时知道进度与下一步，克服长对话遗忘
+            // 选择性注入：仅当本轮提问与任务相关（或工具循环中间轮）时注入，闲聊场景不污染上下文
             if (conv != null) {
-                String tb = TaskStore.promptBlock(act, conv.id);
+                String tb = TaskStore.promptBlock(act, conv.id, lastUserText());
                 if (!tb.isEmpty()) sb.append(tb);
+            }
+            // 【记忆层】长期记忆摘要：只给「分类·标题」不给正文，正文按需 mem_read，token 成本可控
+            if (p.memInject()) {
+                String md = MemoryStore.injectDigest(act, p.memInjectTop());
+                if (!md.isEmpty()) sb.append("\n[长期记忆] ").append(md);
+            }
+            // 【任务规划门禁】关闭时在系统提示中明示，避免模型反复尝试 task_create 被拒
+            if (!p.taskPlanning()) {
+                sb.append("\n[能力边界] 任务规划已被用户关闭：不要调用 task_create/task_update，"
+                        + "直接执行动作，完成后调用 task_complete。");
+            }
+            // 【子 Agent 门禁】开关关闭时不提示、不暴露能力
+            if (!p.subAgentEnabled()) {
+                sb.append("\n[能力边界] 子 Agent（subagent_run）功能已被用户在设置中关闭，"
+                        + "请改用主流程自带工具直接完成，不要委派。");
+            }
+            // 【团队协作门禁】
+            if (p.subAgentEnabled() && !p.teamEnabled()) {
+                sb.append("\n[能力边界] 团队协作（team_run）功能已被用户在设置中关闭，"
+                        + "需要多视角评审时请改用 subagent_run 或主流程工具。");
+            }
+            // 【团队协作约束】防止为同一目标反复组队：实测模型会连开 3~4 次群聊，token 成倍浪费
+            if (p.teamEnabled()) {
+                sb.append("\n[团队协作约束] team_run 的产出即为该目标的阶段结论：同一目标只组建一次团队；"
+                        + "若本会话已有群聊交付物，直接基于它作答，不要重复组队，"
+                        + "也不得以「再核实一遍」「结果可能不完整」为由重开。"
+                        + "同一会话最多组建 ").append(TeamOrchestrator.MAX_TEAM_RUNS)
+                        .append(" 次，达到上限后工具会直接拒绝调用。");
             }
         }
         return sb.toString();
@@ -1225,94 +1422,11 @@ public class ChatPage extends Page {
             if ("user".equals(m.role)) { firstUserMsg = m; break; }
         }
 
-        // 2) Token 预算控制：maxPromptTokens 生效
-        int maxTokens = Prefs.get(act).maxPromptTokens();
-        if (maxTokens > 0) {
-            // 估算固定开销：系统提示 + 工具 Schema
-            int fixedOverhead = estimateTokens(sys);
-            if (withTools) {
-                JSONArray specs = toolSpecsIfAny();
-                if (specs != null) fixedOverhead += estimateTokens(specs.toString());
-            }
-            int budget = maxTokens - fixedOverhead;
-            if (budget < 4096) budget = 4096; // 留最小预算，保证近期上下文
+        // 2) 历史完整透传：不做 Token 预算裁剪，也不做 ctxMsgs 硬截断（上下文长度交由模型/服务端默认处理）
 
-            // 【缓存命中率优化】只做「整条丢弃最旧」，不再就地截断中间消息内容。
-            // 就地截断会改变仍保留在请求中的前缀字节，云端前缀缓存必然 miss；
-            // 从头部整条丢弃则保证「保留部分」字节稳定，缓存可持续命中。
-            long totalTokens = 0;
-            int keepFrom = hist.size();
-            for (int i = hist.size() - 1; i >= 0; i--) {
-                ConvStore.Msg m = hist.get(i);
-                int msgTokens = estimateMsgTokens(m);
-                if (totalTokens + msgTokens > budget) {
-                    // 防「历史清零」：最新一条本身就超预算时也必须保留它（压缩内容而非整体丢弃）。
-                    // 旧逻辑在此直接 break 且 keepFrom 停在 hist.size() → 历史被整段丢弃，
-                    // 上下文只剩「系统提示 + 最初那条用户消息」，表现为 Agent 只记得第一条任务提示，
-                    // 之后用户发的所有新提示全部遗忘。
-                    if (i == hist.size() - 1) {
-                        // 只压缩工具/助手输出这类可再生内容，用户输入永不改写
-                        if (m.content != null && !"user".equals(m.role)) {
-                            int cap = Math.max(200, budget * 2);
-                            if (m.content.length() > cap) m.content = smartTruncateTool(m.content, cap);
-                        }
-                        totalTokens += estimateMsgTokens(m);
-                        keepFrom = i;
-                    }
-                    break;
-                }
-                totalTokens += msgTokens;
-                keepFrom = i;
-            }
-            // 兜底：任何情况下都不得把历史清空，至少保留最近一条消息
-            if (!hist.isEmpty() && keepFrom >= hist.size()) keepFrom = hist.size() - 1;
-            if (keepFrom > 0) {
-                List<ConvStore.Msg> trimmed = new ArrayList<>(hist.subList(keepFrom, hist.size()));
-                ensureLatestTask(trimmed, latestUserMsg, firstUserMsg);
-                hist = trimmed;
-            }
-        } else {
-            // 兼容旧逻辑：ctxMsgs 硬截断
-            int keep = Math.max(0, Prefs.get(act).ctxMsgs());
-            if (hist.size() > keep) {
-                List<ConvStore.Msg> trimmed = new ArrayList<>(hist.subList(hist.size() - keep, hist.size()));
-                ensureLatestTask(trimmed, latestUserMsg, firstUserMsg);
-                hist = trimmed;
-            }
-        }
-
-        // 3) 旧有摘要逻辑（基于字符阈值触发）
+        // 3) 历史不再做字符阈值摘要压缩：完整历史透传（摘要只用于会话标题等旁路用途）
         int from = 0;
         String sum = "";
-        int threshold = Math.max(16000, Prefs.get(act).summaryKb() * 1000);
-        if (charsOf(hist, 0, hist.size()) > threshold) {
-            int minKeep = Math.min(hist.size(), 4);
-            int limit = hist.size() - minKeep;
-            int chunk = Math.max(8000, threshold / 4);
-            long acc = 0;
-            int target = 0;
-            for (int i = 0; i < limit; i++) {
-                ConvStore.Msg m = hist.get(i);
-                acc += m.content == null ? 0 : m.content.length();
-                target = i + 1;
-                if (acc >= chunk) break;
-            }
-            boolean haveSummary = !conv.summary.isEmpty();
-            boolean cooling = summaryFailAt > 0
-                    && System.currentTimeMillis() - summaryFailAt < 120000;
-            if (target == 0 || (haveSummary && target <= conv.summaryCount)
-                    || (haveSummary && cooling)) {
-                from = haveSummary ? Math.max(0, Math.min(conv.summaryCount, limit)) : 0;
-                sum = conv.summary;
-            } else if (haveSummary && charsOf(hist, conv.summaryCount, target) < chunk) {
-                from = Math.max(0, Math.min(conv.summaryCount, limit));
-                sum = conv.summary;
-            } else {
-                sum = ensureSummary(hist, target);
-                from = target;
-                if (sum.isEmpty()) summaryFailAt = System.currentTimeMillis();
-            }
-        }
         while (from < hist.size() && "tool".equals(hist.get(from).role)) from++;
         if (from > 0 && !sum.isEmpty()) {
             ConvStore.Msg s = new ConvStore.Msg("system",
@@ -1387,6 +1501,16 @@ public class ChatPage extends Page {
                 list.add(0, new ConvStore.Msg("system", "【背景·最初任务，仅作参考，非用户发言】" + t));
             }
         }
+    }
+
+    /** 【选择性注入依据】取最近一条真实用户消息文本，为空表示当前处于工具循环中间轮 */
+    private String lastUserText() {
+        if (conv == null) return "";
+        for (int i = conv.msgs.size() - 1; i >= 0; i--) {
+            ConvStore.Msg m = conv.msgs.get(i);
+            if ("user".equals(m.role) && m.content != null && !m.content.trim().isEmpty()) return m.content.trim();
+        }
+        return "";
     }
 
     /** 工具循环中「距离最近的任务提示」锚：取最近一条真实用户消息，附当前进度，追加到消息尾部 */
@@ -1504,8 +1628,6 @@ public class ChatPage extends Page {
                 JSONObject body = new JSONObject();
                 body.put("model", useModel);
                 body.put("stream", true);
-                body.put("temperature", 0.3);
-                body.put("max_tokens", 700);
                 body.put("messages", ms);
                 Cloud.chat(sumUrl, sumKey, body.toString(), new Http.Cancel(), new Cloud.ChatCb() {
                     @Override public void delta(String t) { if (out.length() < 6000) out.append(t); }
@@ -1518,10 +1640,6 @@ public class ChatPage extends Page {
                 JSONObject body = new JSONObject();
                 body.put("model", model);
                 body.put("stream", true);
-                JSONObject opt = new JSONObject();
-                opt.put("temperature", 0.3);
-                opt.put("num_predict", 700);
-                body.put("options", opt);
                 body.put("messages", ms);
                 Ollama.chat(p.host(), p.port(), body.toString(), new Http.Cancel(), new Ollama.ChatCb() {
                     @Override public void delta(String t) { if (out.length() < 6000) out.append(t); }
@@ -1601,8 +1719,6 @@ public class ChatPage extends Page {
                 JSONObject body = new JSONObject();
                 body.put("model", useModel);
                 body.put("stream", true);
-                body.put("temperature", 0.3);
-                body.put("max_tokens", 32);
                 body.put("messages", ms);
                 Cloud.chat(sumUrl, sumKey, body.toString(), new Http.Cancel(), new Cloud.ChatCb() {
                     @Override public void delta(String t) { if (out.length() < 60) out.append(t); }
@@ -1615,10 +1731,6 @@ public class ChatPage extends Page {
                 JSONObject body = new JSONObject();
                 body.put("model", model);
                 body.put("stream", true);
-                JSONObject opt = new JSONObject();
-                opt.put("temperature", 0.3);
-                opt.put("num_predict", 32);
-                body.put("options", opt);
                 body.put("messages", ms);
                 Ollama.chat(p.host(), p.port(), body.toString(), new Http.Cancel(), new Ollama.ChatCb() {
                     @Override public void delta(String t) { if (out.length() < 60) out.append(t); }
@@ -1710,7 +1822,9 @@ public class ChatPage extends Page {
             "web_vision",
             "image_generate",
             "rename_conv",
-            "load_tool_spec"
+            "load_tool_spec",
+            "subagent_run",
+            "team_run"
         };
         java.util.Set<String> coreSet = new java.util.HashSet<>(java.util.Arrays.asList(coreNames));
         JSONArray valid = new JSONArray();
@@ -1721,6 +1835,13 @@ public class ChatPage extends Page {
             if (tool == null) continue;
             org.json.JSONObject fn = tool.optJSONObject("function");
             String name = fn != null ? fn.optString("name", "") : "";
+            // 【子 Agent 开关】关闭后该工具不进规格列表，模型无从调用
+            if ("subagent_run".equals(name) && !Prefs.get(act).subAgentEnabled()) continue;
+            // 【团队协作开关】关闭后 team_run 不进规格列表
+            if ("team_run".equals(name) && !Prefs.get(act).teamEnabled()) continue;
+            // 【任务规划开关】关闭后只保留只读查询（task_status/task_list），创建与更新一并不再暴露
+            if (!Prefs.get(act).taskPlanning()
+                    && ("task_create".equals(name) || "task_update".equals(name))) continue;
             if (tool.has("type") && tool.has("function") && coreSet.contains(name)) {
                 valid.put(tool);
             }
@@ -1955,6 +2076,7 @@ public class ChatPage extends Page {
                     Object a = w.opt("arguments");
                     call.args = a instanceof JSONObject ? a.toString() : String.valueOf(a == null ? "{}" : a);
                     call.id = "call_" + i;
+                    call.extra = ConvStore.ToolCall.extrasOf(tc.getJSONObject(i));
                     msg.tools.add(call);
                 }
             }
@@ -1977,6 +2099,9 @@ public class ChatPage extends Page {
                     String a = fn.isNull("arguments") ? "{}" : fn.optString("arguments", "{}");
                     if (a.trim().isEmpty() || "null".equals(a.trim())) a = "{}";
                     call.args = a;
+                    // Gemini/Vertex 在 OpenAI 兼容层把 thought_signature 放在 extra_content 里，
+                    // 必须原样留存并回传，否则下一轮工具调用报 400
+                    call.extra = ConvStore.ToolCall.extrasOf(item);
                     msg.tools.add(call);
                 }
             }
@@ -2377,7 +2502,27 @@ public class ChatPage extends Page {
 
     /** 工具结果自动摘要阈值：超过此字符数触发摘要（默认 4000 字符约 1.3k token） */
     private static int toolResultSummaryThreshold() {
-        return Prefs.get(App.inst).summaryKb() * 1000 / 4; // 复用 summaryKb 设置，约 1/4 作为单工具阈值
+        return 4000; // 固定阈值（原按 summaryKb 派生，已随对话参数一并砍掉）
+    }
+
+    /** 单组工具执行的等待上限（秒）：按组内最耗时的工具取上限，防止单点卡死挂死整个回合 */
+    private static long groupTimeoutSec(java.util.List<ConvStore.ToolCall> group) {
+        long sec = 120;
+        for (ConvStore.ToolCall c : group) {
+            String n = c.name == null ? "" : c.name;
+            long s;
+            if (n.equals("subagent_run") || n.equals("team_run")) {
+                s = 900;  // 子 Agent / 团队编排：多轮模型调用，耗时最长
+            } else if (n.startsWith("browser_") || n.equals("web_vision")
+                    || n.equals("image_generate") || n.equals("run_command")
+                    || n.startsWith("task_")) {
+                s = 300;  // 浏览器自动化 / 视觉 / 生图 / 命令 / 任务：可能较久
+            } else {
+                s = 120;  // 其余常规工具
+            }
+            if (s > sec) sec = s;
+        }
+        return sec;
     }
 
     /** 对超长工具结果进行摘要（后台同步调用模型） */
@@ -2408,8 +2553,6 @@ public class ChatPage extends Page {
                 JSONObject body = new JSONObject();
                 body.put("model", useModel);
                 body.put("stream", true);
-                body.put("temperature", 0.2);
-                body.put("max_tokens", 800);
                 body.put("messages", ms);
                 Cloud.chat(sumUrl, sumKey, body.toString(), new Http.Cancel(), new Cloud.ChatCb() {
                     @Override public void delta(String t) { if (out.length() < 3000) out.append(t); }
@@ -2422,10 +2565,6 @@ public class ChatPage extends Page {
                 JSONObject body = new JSONObject();
                 body.put("model", model);
                 body.put("stream", true);
-                JSONObject opt = new JSONObject();
-                opt.put("temperature", 0.2);
-                opt.put("num_predict", 800);
-                body.put("options", opt);
                 body.put("messages", ms);
                 Ollama.chat(p.host(), p.port(), body.toString(), new Http.Cancel(), new Ollama.ChatCb() {
                     @Override public void delta(String t) { if (out.length() < 3000) out.append(t); }
@@ -2503,6 +2642,17 @@ public class ChatPage extends Page {
                             if (LocalTools.has(call.name)) {
                                 org.json.JSONObject a = JsonFix.parseObject(
                                         call.args == null || call.args.trim().isEmpty() ? "{}" : call.args);
+                                // 可视化：把 tool_call id 透传给多智能体模块，
+                                // 使其运行轨迹可用该 id 关联到消息（实时活动条 + 结果卡片）
+                                if ("team_run".equals(call.name) || "subagent_run".equals(call.name)) {
+                                    try { a.put("__runid", call.id == null ? "" : call.id); }
+                                    catch (Throwable ignored) {}
+                                }
+                                // 防重复组队门禁：把本会话已完成的群聊次数透传给编排器
+                                if ("team_run".equals(call.name)) {
+                                    try { a.put("__teamruns", priorTeamRuns()); }
+                                    catch (Throwable ignored) {}
+                                }
                                 resultText = LocalTools.call(call.name, a);
                                 if (resultText.length() > 6000) resultText = resultText.substring(0, 6000) + "\n…[输出过长已截断]";
                             } else if (PluginToolExec.isPluginTool(call.name)) {
@@ -2550,12 +2700,24 @@ public class ChatPage extends Page {
                     });
                 }
 
-                // 等待本组所有工具完成
+                // 等待本组所有工具完成（带超时：防止单个工具/MCP 卡死挂死整个回合）
+                long waitSec = groupTimeoutSec(group);
+                boolean finishedInTime;
                 try {
-                    latch.await();
+                    finishedInTime = latch.await(waitSec, java.util.concurrent.TimeUnit.SECONDS);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     break;
+                }
+                if (!finishedInTime) {
+                    // 超时的调用补一条可读的 tool 结果，保证 tool_call 链完整（防 API 400 unknown tool_call_id）
+                    for (int i = 0; i < group.size(); i++) {
+                        if (results[i] == null) {
+                            results[i] = "[工具执行超时 " + waitSec + "s，已跳过等待] " + group.get(i).name;
+                            ErrLog.log(App.inst, "tool-timeout:" + group.get(i).name,
+                                    new Exception("tool did not finish within " + waitSec + "s"));
+                        }
+                    }
                 }
 
                 // 按原顺序收集结果并写入对话
@@ -2584,11 +2746,17 @@ public class ChatPage extends Page {
                     completed++;
                     final int dn = completed;
                     final String toolName = call.name;
-                    final String preview = rt.length() > 60 ? rt.substring(0, 60) + "…" : rt.replace("\n", " ");
+                    // 预览行也要剥思考段：部分模型会把 <think> 直接写进工具返回的正文
+                    String pv = stripThink(rt).replace("\n", " ").trim();
+                    if (pv.length() > 60) pv = pv.substring(0, 60) + "…";
+                    // 整条都是思考段时不留悬空箭头
+                    final String notice = pv.isEmpty()
+                            ? "执行中 " + dn + "/" + total + "：" + toolName
+                            : "执行中 " + dn + "/" + total + "：" + toolName + " → " + pv;
 
                     Ui.H.post(() -> {
                         if (conv == null || !uiAlive()) return;
-                        updateLastNotice("执行中 " + dn + "/" + total + "：" + toolName + " → " + preview);
+                        updateLastNotice(notice);
                     });
 
                     if (hasTaskComplete[0]) {
@@ -2650,6 +2818,17 @@ public class ChatPage extends Page {
     /** UI 是否仍然存活：Activity 尚未结束/销毁，避免回调触达已销毁视图而崩溃 */
     private boolean uiAlive() {
         return act != null && !act.isFinishing() && !act.isDestroyed();
+    }
+
+    /** 本会话已产出的 team_run 群聊结果条数（用于限制同一对话内反复组队） */
+    private int priorTeamRuns() {
+        int n = 0;
+        if (conv != null && conv.msgs != null) {
+            for (ConvStore.Msg x : conv.msgs) {
+                if ("tool".equals(x.role) && "team_run".equals(x.toolName)) n++;
+            }
+        }
+        return n;
     }
 
     void regenerate() {
@@ -2806,6 +2985,7 @@ public class ChatPage extends Page {
         loadModels();
         refreshViews();
         refreshEmpty();
+        refreshActivityBar();   // 切回本页时若多智能体仍在运行，立即恢复活动条
     }
 
     /** 供 AI 工具（create_persona/delete_persona 等）操作人设库后刷新界面 */

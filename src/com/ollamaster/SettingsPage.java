@@ -41,6 +41,7 @@ public class SettingsPage extends Page {
         buildServerSection(root);
         buildThemeSection(root);
         buildChatSection(root);
+        buildContextSection(root);
         buildTtsSection(root);
         buildImgSection(root);
         buildVisionSection(root);
@@ -424,6 +425,54 @@ public class SettingsPage extends Page {
         row.setOnClickListener(v -> ColorPick.show(act, Theme.of(act), title, initial, cb).show());
     }
 
+    /** 【上下文与能力】记忆注入 / 选择性目标注入 / 目标清单压缩 / 子 Agent 开关 */
+    private void buildContextSection(LinearLayout root) {
+        LinearLayout card = section(root, "上下文与能力");
+        final Prefs p = Prefs.get(act);
+
+        LinearLayout r1 = baseRow(card);
+        rowTitle(r1, "记忆自动注入", "开场把最近记忆的「分类·标题」附进系统提示，长期沉淀开箱即用");
+        addSwitch(r1, p.memInject(), (b, on) -> { p.memInject(on); rebuildSoon(); });
+        hair(card);
+
+        rowClick(card, "记忆注入条数", "注入最近 N 条（默认 5，仅标题不含正文，正文按需 mem_read）",
+                () -> inputDialog("记忆注入条数", "建议 3～10，过大将侵蚀提示词预算",
+                        String.valueOf(p.memInjectTop()), false, true, s -> {
+                            try { p.memInjectTop(Math.max(1, Integer.parseInt(s.trim()))); rebuildSoon(); }
+                            catch (Exception ignored) {}
+                        }));
+        hair(card);
+
+        LinearLayout r2 = baseRow(card);
+        rowTitle(r2, "选择性目标注入", "仅当提问与任务相关时才注入任务清单，闲聊不被任务上下文污染");
+        addSwitch(r2, p.targetInject(), (b, on) -> { p.targetInject(on); rebuildSoon(); });
+        hair(card);
+
+        LinearLayout r3 = baseRow(card);
+        rowTitle(r3, "目标清单压缩总结", "把长步骤列表压成「总进度+当前步+待办」摘要，显著省 Token");
+        addSwitch(r3, p.targetCompress(), (b, on) -> { p.targetCompress(on); rebuildSoon(); });
+        hair(card);
+
+        LinearLayout r4 = baseRow(card);
+        rowTitle(r4, "任务规划", "允许 AI 自主拆解多步骤任务并持久化跟踪进度（task_create）");
+        addSwitch(r4, p.taskPlanning(), (b, on) -> { p.taskPlanning(on); rebuildSoon(); });
+        hair(card);
+
+        LinearLayout r5 = baseRow(card);
+        rowTitle(r5, "子 Agent 功能", "开启后 AI 可把子任务委派给独立上下文的执行体（subagent_run）");
+        addSwitch(r5, p.subAgentEnabled(), (b, on) -> { p.subAgentEnabled(on); rebuildSoon(); });
+        hair(card);
+
+        LinearLayout r6 = baseRow(card);
+        rowTitle(r6, "团队协作（Agent 工作群聊）", "开启后 AI 可组建多角色团队协作：轮流发言+汇总交付物（team_run）");
+        addSwitch(r6, p.teamEnabled(), (b, on) -> { p.teamEnabled(on); rebuildSoon(); });
+    }
+
+    /** 开关后重建界面，保证行内状态与设置项即时一致 */
+    private void rebuildSoon() {
+        act.recreate();
+    }
+
     private void buildChatSection(LinearLayout root) {
         LinearLayout card = section(root, "对话参数");
         final Prefs p = Prefs.get(act);
@@ -440,30 +489,6 @@ public class SettingsPage extends Page {
         rowTitle(drow, "流式诊断", "每轮结束显示增量块数与首字延迟，用于排查整块输出");
         addSwitch(drow, p.streamDiag(), (b, on) -> p.streamDiag(on));
 
-        hair(card);
-        sliderRow(card, "温度 Temperature", 0, 15, Math.round(p.temperature() * 10),
-                v -> String.format(java.util.Locale.US, "%.1f", v / 10f), v -> p.temperature(v / 10f));
-        hair(card);
-        sliderRow(card, "Top-P 采样", 1, 10, Math.round(p.topP() * 10),
-                v -> String.format(java.util.Locale.US, "%.1f", v / 10f), v -> p.topP(v / 10f));
-        hair(card);
-        sliderRow(card, "最大上下文（超出自动总结）", 16, 1024, p.summaryKb(),
-                v -> v >= 1024 ? "1M 字符" : v + "k 字符", v -> p.summaryKb(v));
-        hair(card);
-        // 最大提示词 Token 预算：0 = 不限制；单位千 token
-        final TextView budgetVal = sliderRow(card, "提示词 Token 预算", 0, 200,
-                Math.min(200, p.maxPromptTokens() / 1000),
-                v -> v == 0 ? "不限制" : v + "k tokens", v -> p.maxPromptTokens(v * 1000));
-        hair(card);
-        sliderRow(card, "失败自动重试", 0, 6, p.retryMax(),
-                v -> v == 0 ? "关闭" : "最多 " + v + " 次", v -> p.retryMax(v));
-        hair(card);
-        rowClick(card, "最大生成 Tokens", String.valueOf(p.maxTokens()), () ->
-                inputDialog("最大生成 Tokens", "num_predict 上限", String.valueOf(p.maxTokens()), false, true, s -> {
-                    try {
-                        p.maxTokens(Math.max(64, Integer.parseInt(s.trim())));
-                    } catch (Exception ignored) {}
-                }));
         hair(card);
         rowClick(card, "全局系统提示词", p.sysPrompt().isEmpty() ? "未设置" :
                 p.sysPrompt().length() > 30 ? p.sysPrompt().substring(0, 29) + "…" : p.sysPrompt(),
@@ -850,9 +875,19 @@ public class SettingsPage extends Page {
         });
     }
 
+    /** 【版本动态化】从 PackageManager 读取真实 versionName，避免硬编码过期文案 */
+    private String appVersion() {
+        try {
+            return "v" + act.getPackageManager()
+                    .getPackageInfo(act.getPackageName(), 0).versionName;
+        } catch (Exception e) {
+            return "v-dev";
+        }
+    }
+
     private void buildAboutSection(LinearLayout root) {
         LinearLayout card = section(root, "关于");
-        rowClick(card, "Ollamaster", "v1.5.0 · 原生 Android 客户端", () -> {});
+        rowClick(card, "Ollamaster", appVersion() + " · 原生 Android 客户端", () -> {});
         hair(card);
         TextView desc = new TextView(act);
         desc.setText("为 Ollama 打造的本地优先 AI 工作台。\n支持局域网自动发现节点、人设卡、双模式、" +

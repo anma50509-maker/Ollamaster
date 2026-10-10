@@ -33,7 +33,7 @@ featuring an Agent tool loop, hot-pluggable plugin system, MCP client, browser a
 
 ## 📦 Version Info
 
-- versionName: **1.9.2**
+- versionName: **1.9.12**
 - versionCode: **26**
 - minSdk: **26** (Android 8.0) · targetSdk: **35**
 

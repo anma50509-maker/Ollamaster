@@ -567,8 +567,10 @@ public class Markdown {
         String[] parts = raw.split("```", -1);
         for (int i = 0; i < parts.length; i++) {
             if (i % 2 == 1) {
-                // 代码块：保留围栏原样，交给 render() 处理
-                acc.append("```").append(parts[i]).append("```");
+                // 代码块：独立卡片视图（语言标签 + 复制 + 等宽 + 横向滚动），停留在原文位置
+                flushText(ctx, t, r, acc);
+                View cv = buildCodeView(ctx, parts[i], t);
+                if (cv != null) r.flow.add(cv);
                 continue;
             }
             String[] lines = parts[i].split("\n", -1);
@@ -607,6 +609,80 @@ public class Markdown {
         }
         r.text = render(ctx, allText.toString(), t);
         return r;
+    }
+
+    /** 代码块卡片：语言标签 + 复制按钮 + 等宽正文（长行横向滚动，不折行挤压版面） */
+    private static View buildCodeView(Context ctx, String fenceBody, Theme t) {
+        String raw = fenceBody == null ? "" : fenceBody;
+        String lang = "";
+        int nl = raw.indexOf('\n');
+        if (nl >= 0 && nl <= 14) {
+            lang = raw.substring(0, nl).trim();
+            raw = raw.substring(nl + 1);
+        } else if (nl < 0) {
+            lang = raw.trim();
+            raw = "";
+        }
+        while (raw.endsWith("\n")) raw = raw.substring(0, raw.length() - 1);
+        if (raw.trim().isEmpty()) return null;
+        final String code = raw;
+
+        LinearLayout card = new LinearLayout(ctx);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackground(Ui.stroke(t.alpha(t.accent, 0.07f), t.alpha(t.accent, 0.20f),
+                Ui.dpi(ctx, 10), Ui.dpi(ctx, 0.8f)));
+        int cp = Ui.dpi(ctx, 9);
+        card.setPadding(cp, Ui.dpi(ctx, 5), cp, Ui.dpi(ctx, 7));
+
+        LinearLayout head = new LinearLayout(ctx);
+        head.setOrientation(LinearLayout.HORIZONTAL);
+        head.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        TextView lb = new TextView(ctx);
+        lb.setText(lang.isEmpty() ? "code" : lang.toLowerCase(java.util.Locale.US));
+        lb.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, Ui.spi(ctx, 10));
+        lb.setTypeface(Ui.mono());
+        lb.setTextColor(t.alpha(t.textSec, 0.95f));
+        lb.setSingleLine(true);
+        head.addView(lb, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView copy = new TextView(ctx);
+        copy.setText("复制");
+        copy.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, Ui.spi(ctx, 10.5f));
+        copy.setTextColor(t.alpha(t.accent, 0.95f));
+        copy.setPadding(Ui.dpi(ctx, 8), Ui.dpi(ctx, 2), Ui.dpi(ctx, 8), Ui.dpi(ctx, 2));
+        copy.setBackground(Ui.ripple(Ui.round(t.alpha(t.accent, 0.10f), Ui.dpi(ctx, 999)),
+                t.alpha(t.accent, 0.22f)));
+        copy.setOnClickListener(v -> {
+            try {
+                android.content.ClipboardManager cm = (android.content.ClipboardManager)
+                        ctx.getSystemService(Context.CLIPBOARD_SERVICE);
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("code", code));
+                android.widget.Toast.makeText(ctx, "代码已复制",
+                        android.widget.Toast.LENGTH_SHORT).show();
+            } catch (Throwable ignored) {}
+        });
+        head.addView(copy);
+        card.addView(head, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        TextView tv = new TextView(ctx);
+        tv.setText(code);
+        tv.setTypeface(Ui.mono());
+        tv.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, Ui.spi(ctx, 11.5f));
+        tv.setLineSpacing(0, 1.18f);
+        tv.setTextColor(Theme.mix(t.textPri, t.accent, 0.25f));
+        tv.setHorizontallyScrolling(true);
+        tv.setMaxWidth(Ui.dpi(ctx, 258));
+        tv.setPadding(0, Ui.dpi(ctx, 4), Ui.dpi(ctx, 4), 0);
+
+        HorizontalScrollView hs = new HorizontalScrollView(ctx);
+        hs.setHorizontalScrollBarEnabled(true);
+        hs.addView(tv, new HorizontalScrollView.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        card.addView(hs, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        return card;
     }
 
     /** 把累积的文本块渲染后推入 flow */

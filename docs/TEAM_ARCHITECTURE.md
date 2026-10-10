@@ -1,7 +1,7 @@
 # Ollamaster 智能团队 · 子 Agent 系统架构设计
 
-> 版本：v1.0（设计稿，2026-09）
-> 关联文档：`ARCHITECTURE.md`（现有单体 Agent 运行时）、`PLUGIN_SYSTEM.md`（插件热插拔）
+> 版本：v2.0（2026-10）— L2 子 Agent 与 L3 团队编排（Agent 工作群聊）均已落地（v1.9.4）
+> 关联文档：`ARCHITECTURE.md`（单体 Agent 运行时）、`MULTI_AGENT_RESEARCH.md`（16 篇开源论文设计依据）、`PLUGIN_SYSTEM.md`（插件热插拔）
 > 目标：在现有「单 Agent + 深度工具循环」之上，增补**任务分析 → 规划 → 持久化调度 → 多子 Agent 协作**能力，并完成鲁棒性加固。
 
 ---
@@ -122,13 +122,16 @@ RUNNING ──pause──▶ PAUSED ──resume──▶ RUNNING
 
 ## 四、L2 子 Agent 运行层（SubAgentRunner）
 
+> **状态：✅ 已实现（v1.9.4）** —— `SubAgentRunner.java` 已落地并接入 `subagent_run` 工具，
+> 构建通过；**L3（TeamOrchestrator）亦已于 v1.9.4 落地**，见文末「实现契约」。
+
 ### 1. 角色（Role）
 
 - `name` / `goal` / `backstory`（即 CrewAI 的 role/goal/backstory 三元组）
 - `modelRef`：可指定独立模型（复用模型池 / `ModelEntry`）
 - `toolAllow[]`：工具白名单（子 Agent 默认**只读优先**：read_file/list_files/web_fetch/mem_*；写操作需显式授权）
 - `systemPrompt`：由 name/goal/backstory + 团队约束拼装
-- `maxRounds` / `maxTokens` / `timeoutSec`：独立预算（继承 `Prefs` 默认值可覆盖）
+- `maxRounds` / `maxTokens` / `timeoutSec`：独立预算（轮数/超时，对话参数用模型默认值）
 
 ### 2. 运行器行为（一次「子 Agent 任务」= 一次受限的 runTurn）
 
@@ -142,11 +145,14 @@ RUNNING ──pause──▶ PAUSED ──resume──▶ RUNNING
 
 - 子 Agent 不直接改主会话 `conv.msgs`，只通过「产物」与父级交互（避免污染主上下文、避免 tool_call 链错乱）。
 - 写类工具默认拒绝清单：`delete_path / run_command / set_setting / key_pool_* / install_plugin`（除非角色显式授权）。
-- 每个子 Agent 有硬性 `maxRounds`（默认 8）与 `maxTokens`，防止「子 Agent 打转烧钱」。
+- 每个子 Agent 有硬性 `maxRounds`（默认 8）与超时上限，防止「子 Agent 打转烧钱」。
 
 ---
 
 ## 五、L3 团队编排层（TeamOrchestrator）
+
+> **状态：✅ 已实现（v1.9.4）** —— `TeamOrchestrator.java`（361 行）已落地并接入 `team_run` 工具，
+> 由设置项 `teamEnabled` 控制（默认开）。实际编排模式为 **chat / pipeline / hierarchical / debate**（见文末「实现契约」）。
 
 ### 1. 团队（Team）
 
@@ -240,3 +246,72 @@ RUNNING ──pause──▶ PAUSED ──resume──▶ RUNNING
 2. **延迟**：并行可缓解；串行/评审模式仅建议在质量敏感任务启用。
 3. **复杂度**：坚持「L1 先落地、L2/L3 开关制」，避免一次性大改 `ChatPage`（最大文件，改前先备份到 `legacy/`）。
 4. **兼容性**：所有新工具默认不注入核心表，`editMode` 关闭时完全无感。
+
+
+---
+
+## 十、L2 实现契约（v1.9.4 落地记录）
+
+**文件**：`src/com/ollamaster/SubAgentRunner.java`（新），`LocalTools.java`（spec/has/call 三处接入），
+`ChatPage.java`（核心工具白名单加入 `subagent_run`）。
+
+**对外工具**：`subagent_run(task, context?, tools?, max_rounds?, model?)`
+
+**已实现能力**
+1. **独立上下文**：内部自建 `List<Msg>`（system + user），读写主会话历史为零，保护主对话与前缀缓存。
+2. **同步闭环**：在工具执行线程内跑完「请求模型 → 执行工具 → 再请求模型」多轮，最终以字符串报告作为 tool 结果回主 Agent。
+3. **工具白名单**：仅放行只读/产物类工具（文件、终端、网络、浏览器、视觉、生图、记忆、TTS、只读设置、load_tool_spec）；
+   硬拦截 `subagent_run`（防递归）、`task_*`（防主/子竞争会话级任务）、`set_setting`、`key_pool_*`（防误改配置与密钥外泄）、技能/MCP/插件/人设管理。
+4. **预算控制**：默认 `max_rounds=6`（允许 1~12）；用尽后追加收口提示强制作结，并标注「结论可能不完整」。
+5. **截断防爆**：单条工具结果上限 6000 字符、最终报告上限 8000 字符。
+6. **模型可选**：`model` 指定时云端按密钥池 models 反查服务商 url/key，未命中回落到主云端配置；本地模式直接用 host/port。
+7. **超时放宽**：子 Agent 常跑远程/长任务，超时取 `max(30s, timeoutSec)`，并支持 `Http.Cancel` 中止。
+
+**与设计稿的取舍（务实收敛）**
+- 设计稿的 `Role(name/goal/backstory)` 三元组与 `roles/teams` 持久化属 L3；L2 阶段以「一次性子任务」为粒度，
+  通过 `task` + `context` 两参数表达角色意图，避免过早引入 `team.json` 复杂度。
+- 设计稿的 `attempts` 指数退避重试**未实现**（避免失败任务反复烧 token）；改为失败即带部分输出返回，由主 Agent 决定是否重试。
+- 结构化 `{status, artifacts[], tokens, elapsedMs}` 信封暂以「纯文本报告」替代，长产物由子 Agent 用 `write_file` 自行落盘。
+- 取消传播为「单级」（父级 timeout 触发 `cancel.stop`），递归深度硬上限 1（白名单拦截），符合设计稿「禁止嵌套 spawn」。
+
+**成本与延迟**：单次 `subagent_run` 会额外消耗一轮以上模型调用；`max_rounds` 是唯一成本闸门。
+建议仅用于「中间输出量大」或「需要隔离试探」的子任务，简单任务直接在主循环完成更省。
+
+---
+
+## 十一、L3 实现契约（v1.9.4 落地记录 · Agent 工作群聊）
+
+**状态：✅ 已实现并构建通过（`TeamOrchestrator.java`，361 行）**
+
+**入口与开关**
+- 工具入口：`LocalTools.call()` → `case "team_run" → TeamOrchestrator.toolRun(args)`；`specs()` 注入 `team_run`，`has()` 命中 `team_run`。
+- 开关：`Prefs.teamEnabled()`（默认 `true`）。关闭时 `ChatPage` 的 `toolSpecsIfAny()` 直接 `continue` 跳过 `team_run`（不进规格表），并在系统提示追加「[能力边界] 团队协作已关闭」。
+- 递归防护：`subagent_run` 与 `team_run` 均不在 L2 白名单内 → 角色无法再拉子团队（深度硬上限 1）。
+
+**参数**：`team_run(task, context?, roles?, mode?, rounds?, tools?, max_rounds?, model?)`
+- `roles`：`名称:职责;名称:职责` 格式；不足 2 个角色时回落默认四人团队。
+- `mode`：`chat`(默认) / `pipeline` / `hierarchical` / `debate`；非法值回落 `chat`。
+
+**默认角色表（MetaGPT 岗位分工 + AgentVerse 评审，最小可用组合）**
+1. 协调者 — 拆解任务、分配视角、识别分歧、汇总交付物
+2. 设计者 — 给出方案与技术路线（含取舍理由与备选项）
+3. 执行者 — 把方案落成可操作动作：命令、代码、文件路径、步骤
+4. 审查者 — 挑出风险、漏洞、反例与不确定项
+
+**硬预算（对齐 AutoGen `max_round` + AgentVerse 从众效应）**
+- `rounds` 默认 1、上限 3；角色数上限 5（`MAX_ROLES`）；每角色工具往返上限 4（复用 L2 循环）。
+- 纪要总长 9000 字符（`DIGEST_MAX`）；单条发言 1200 字符（`ROLE_LINE_MAX`）；每角色工具往返默认 4、上限 8；最终交付物 12000 字符（`REPORT_MAX`）。
+
+**四种编排模式（共用同一套角色解析/独立上下文/纪要聚合/失败兜底代码路径）**
+- `chat` 圆桌群聊 ← AutoGen：全员轮流发言 `rounds` 轮，共享纪要，协调者收口。
+- `pipeline` 串行流水线 ← MetaGPT/Chain-of-Agents：上一位产出作为下一位输入，返回末棒产出。
+- `hierarchical` 层级分派 ← AgentCoder/GroupChatManager：协调者先拆子任务清单，其余角色各领一条产出，协调者汇总。
+- `debate` 评审辩论 ← Multiagent Debate/AgentVerse：首位出方案，其余角色挑问题并给修订，可多轮迭代。
+
+**提示词设计**
+- `roleSystem()`：CAMEL 式 Inception Prompting——强约束「只从本角色视角发言、不复述他人、不替他人作答」。
+- `summarySystem()`：MetaGPT 式交接物——固定四段式交付物「结论 / 分工与产出 / 风险 / 下一步」。
+
+**返回结构**：元信息（模式/角色数/轮次）+ 最终交付物 + 群聊纪要（供主 Agent 追溯）。
+
+**成本提示**：单次 `team_run` 产生约 `roles × rounds` 次模型调用（chat 模式另加 1 次汇总）；设置页已明示，开关可随时关闭。

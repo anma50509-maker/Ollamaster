@@ -46,9 +46,7 @@ public class Cloud {
             o.put("stream", true);
             JSONObject so = new JSONObject();
             so.put("include_usage", true);
-            o.put("stream_options", so);            o.put("temperature", Math.round(p.temperature() * 100) / 100.0);
-            o.put("top_p", Math.round(p.topP() * 100) / 100.0);
-            o.put("max_tokens", p.maxTokens());
+            o.put("stream_options", so);
             JSONArray arr = new JSONArray();
             for (ConvStore.Msg m : msgs) arr.put(m.toJsonOpenAI());
             o.put("messages", arr);
@@ -100,6 +98,9 @@ public class Cloud {
         final java.util.SortedMap<Integer, StringBuilder> tcIds = new java.util.TreeMap<>();
         final java.util.SortedMap<Integer, StringBuilder> tcNames = new java.util.TreeMap<>();
         final java.util.SortedMap<Integer, StringBuilder> tcArgs = new java.util.TreeMap<>();
+        // 服务商附加字段（Gemini 的 extra_content.google.thought_signature 等）：流式下也按 index 累积，
+        // 缺失会让下一轮 functionCall 校验失败（HTTP 400），因此必须一路带到 parseCloudTools
+        final java.util.SortedMap<Integer, JSONObject> tcExtra = new java.util.TreeMap<>();
         Http.postStream(url(base, "/chat/completions"), body, h, cancel, new Http.StreamCb() {
             private boolean inThink = false;
             private boolean parsedOk = false;
@@ -175,6 +176,13 @@ public class Cloud {
                                             slot(tcArgs, idx).append(fn.optString("arguments", ""));
                                         }
                                     }
+                                    // 附加字段：可能在首包出现一次，也可能分片重复送达 → 合并保留
+                                    JSONObject ex = ConvStore.ToolCall.extrasOf(c);
+                                    if (ex != null) {
+                                        JSONObject cur = tcExtra.get(idx);
+                                        if (cur == null) tcExtra.put(idx, ex);
+                                        else ConvStore.ToolCall.writeExtras(cur, ex);
+                                    }
                                 }
                             }
                         }
@@ -232,6 +240,7 @@ public class Cloud {
                             fn.put("name", tcNames.get(idx).toString());
                             fn.put("arguments", args);
                             c.put("function", fn);
+                            ConvStore.ToolCall.writeExtras(c, tcExtra.get(idx));
                             out.put(c);
                         }
                         if (out.length() > 0) toolsJson = out.toString();
@@ -329,6 +338,8 @@ public class Cloud {
                 f2.put("name", fn.optString("name"));
                 f2.put("arguments", args);
                 item.put("function", f2);
+                // 服务商附加字段（Gemini extra_content.google.thought_signature 等）原样带下去
+                ConvStore.ToolCall.writeExtras(item, ConvStore.ToolCall.extrasOf(c));
                 out.put(item);
             }
             return out.length() > 0 ? out.toString() : null;

@@ -89,11 +89,6 @@ public class Ollama {
             JSONObject o = new JSONObject();
             o.put("model", model);
             o.put("stream", stream);
-            JSONObject opt = new JSONObject();
-            opt.put("temperature", Math.round(p.temperature() * 100) / 100.0);
-            opt.put("top_p", Math.round(p.topP() * 100) / 100.0);
-            opt.put("num_predict", p.maxTokens());
-            o.put("options", opt);
             if (tools != null && tools.length() > 0) o.put("tools", tools);
             JSONArray arr = new JSONArray();
             for (ConvStore.Msg m : msgs) arr.put(m.toJsonOllama());

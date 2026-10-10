@@ -322,8 +322,8 @@ public class TaskStore {
         }
     }
 
-    /** 供系统提示注入。刻意做成「仅在状态变化时才改变文本」，保护云端前缀缓存。 */
-    public static String promptBlock(Context c, String convId) {
+    /** 【目标选择】挑出当前会话最新的一条未结束任务（RUNNING/PENDING/PAUSED 优先取 updated 最大） */
+    public static Task pick(Context c, String convId) {
         List<Task> all = list(c);
         Task t = null;
         for (Task x : all) {
@@ -332,7 +332,93 @@ public class TaskStore {
                 if (t == null || x.updated > t.updated) t = x;
             }
         }
+        return t;
+    }
+
+    /** 【目标注射·压缩版】把整份清单压成固定几行：总进度 + 已完成数 + 当前步 + 待办预览 + 失败点名。
+     *  长清单（几十步）时比全量罗列省 80%+ token，同时保证模型仍知道「我在哪、下一步做什么」。 */
+    public static String compressBlock(Task t) {
         if (t == null) return "";
+        StringBuilder sb = new StringBuilder();
+        sb.append("【当前任务】").append(t.title)
+          .append("（").append(statusCn(t.status)).append(' ')
+          .append(t.doneCount()).append('/').append(t.total()).append("）");
+        int done = t.doneCount();
+        if (done > 0) sb.append("\n已完成 ").append(done).append(" 步");
+        Step cur = t.activeStep();
+        if (cur != null) {
+            int idx = t.steps.indexOf(cur) + 1;
+            sb.append("\n当前第 ").append(idx).append(" 步：").append(cur.name);
+        } else if (done < t.total()) {
+            sb.append("\n当前：无进行中步骤（可用 task_update action=set_status 激活下一步）");
+        }
+        int rest = 0;
+        StringBuilder todo = new StringBuilder();
+        for (Step s : t.steps) {
+            if (s.isFinal() || s == cur) continue;
+            rest++;
+            if (rest <= 3) todo.append(rest > 1 ? "、" : "").append(s.name);
+        }
+        if (rest > 0) {
+            sb.append("\n待办 ").append(rest).append(" 步：").append(todo);
+            if (rest > 3) sb.append(" 等");
+        }
+        for (Step s : t.steps) {
+            if (ST_FAILED.equals(s.status)) {
+                sb.append("\n注意：步骤「").append(s.name).append("」曾失败，需重试或跳过");
+                break;
+            }
+        }
+        sb.append("\n（按步骤推进；完成一步用 task_update action=set_status 标记；全部完成调用 task_complete。）");
+        return sb.toString();
+    }
+
+    /** 供系统提示注入。刻意做成「仅在状态变化时才改变文本」，保护云端前缀缓存。 */
+    /** 2 参重载：不传用户文本 = 不做相关性过滤（兼容老调用） */
+    public static String promptBlock(Context c, String convId) { return promptBlock(c, convId, null); }
+
+    /** 【选择性目标注入】判断本轮提问是否与当前任务相关：
+     *  targetInject 关闭 → 总是注入；用户文本为空（工具循环中间轮）→ 保持任务在场；
+     *  命中任务关键词或与标题/步骤存在 2 字以上片段重合 → 注入；否则不注入，避免闲聊被任务上下文污染。 */
+    public static boolean relevant(Context c, Task t, String userText) {
+        if (t == null) return false;
+        if (!Prefs.get(c).targetInject()) return true;
+        String q = userText == null ? "" : userText.trim();
+        if (q.isEmpty()) return true;
+        String[] kw = {"任务", "继续", "下一步", "进度", "接着", "完成", "计划", "步骤", "第几"};
+        for (String k : kw) if (q.contains(k)) return true;
+        String scope = (t.title + " " + t.desc);
+        for (Step s : t.steps) scope = scope + " " + s.name;
+        for (String g : grams(q)) if (scope.contains(g)) return true;
+        return false;
+    }
+
+    /** 提取关键字元：中文 2 字片段 + 长度 ≥2 的英文/数字词 */
+    private static List<String> grams(String s) {
+        ArrayList<String> out = new ArrayList<>();
+        StringBuilder cjk = new StringBuilder(), ascii = new StringBuilder();
+        for (int i = 0; i <= s.length(); i++) {
+            char ch = i < s.length() ? s.charAt(i) : ' ';
+            boolean isCjk = ch >= 0x4e00 && ch <= 0x9fff;
+            boolean isWord = Character.isLetterOrDigit(ch) && !isCjk;
+            if (isCjk) { cjk.append(ch); if (ascii.length() >= 2) out.add(ascii.toString().toLowerCase()); ascii.setLength(0); }
+            else if (isWord) { if (cjk.length() >= 2) pushGrams(out, cjk.toString()); cjk.setLength(0); ascii.append(ch); }
+            else { if (cjk.length() >= 2) pushGrams(out, cjk.toString()); cjk.setLength(0);
+                   if (ascii.length() >= 2) out.add(ascii.toString().toLowerCase()); ascii.setLength(0); }
+        }
+        return out;
+    }
+
+    private static void pushGrams(List<String> out, String w) {
+        for (int i = 0; i + 2 <= w.length() && out.size() < 40; i++) out.add(w.substring(i, i + 2));
+    }
+
+    public static String promptBlock(Context c, String convId, String userText) {
+        Task t = pick(c, convId);
+        if (t == null) return "";
+        if (!relevant(c, t, userText)) return "";
+        // 压缩总结开关：开=几行摘要（默认）；关=全量罗列步骤（老行为）
+        if (Prefs.get(c).targetCompress()) return "\n\n" + compressBlock(t);
         StringBuilder sb = new StringBuilder();
         sb.append("\n\n【当前任务】").append(t.title)
           .append("（").append(statusCn(t.status)).append(' ')
@@ -473,6 +559,9 @@ public class TaskStore {
     // ==================== 工具实现 ====================
 
     public static String toolCreate(Context c, String convId, JSONObject args) {
+        // 【任务规划开关】关闭后拒绝创建，提示改用直接执行（task_complete 仍可用）
+        if (!Prefs.get(c).taskPlanning())
+            return "[task_create 已停用] 用户在设置中关闭了「任务规划」。请直接用工具完成任务并调用 task_complete，不要创建任务清单。";
         Task t = create(c, convId, args.optString("title", ""), args.optString("description", ""),
                 args.optString("steps", ""));
         if (t == null) {

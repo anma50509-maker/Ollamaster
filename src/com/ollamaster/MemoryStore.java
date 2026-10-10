@@ -235,6 +235,27 @@ public class MemoryStore {
         return "已删除记忆: " + it.title;
     }
 
+    /** 【记忆注入】压缩摘要：只输出最近 N 条的「分类·标题」单行列表，供系统提示注入。
+     *  刻意不复述正文——正文由 mem_read / mem_search 按需调取，token 成本可控；
+     *  文本仅在最近 N 条集合变化时才变，尽量保护云端前缀缓存。 */
+    public static String injectDigest(Context c, int top) {
+        List<Item> list = list(c);              // 已按 updated 倒序
+        if (list.isEmpty()) return "";
+        int n = top <= 0 ? list.size() : Math.min(top, list.size());
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < n; i++) {
+            Item it = list.get(i);
+            if (it.title == null || it.title.trim().isEmpty()) continue;
+            if (sb.length() > 0) sb.append('；');
+            String cat = it.category == null ? "" : it.category.trim();
+            if (!cat.isEmpty()) sb.append('[').append(cat).append("] ");
+            sb.append(it.title.trim());
+        }
+        if (sb.length() == 0) return "";
+        return "已有 " + list.size() + " 条长期记忆，最近 " + n + " 条：" + sb
+                + "。需要正文时用 mem_read/mem_search 调取，勿凭空猜测。";
+    }
+
     public static String statsText() {
         Context c = App.inst;
         List<Item> all = list(c);
