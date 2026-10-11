@@ -3258,6 +3258,11 @@ public class ChatPage extends Page {
 
     @Override
     public void onShow() {
+        // 【最高优先级】无论任何情况，先强制隐藏 taskBar
+        if (taskBar != null) {
+            taskBar.setVisibility(View.GONE);
+            taskTicking = false;
+        }
         t = Theme.of(act);
         personas = findPersonaList();
         if (emptyChipsRow != null) refreshEmptyChips(emptyChipsRow);
@@ -3265,9 +3270,6 @@ public class ChatPage extends Page {
         loadModels();
         refreshViews();
         refreshEmpty();
-        // 启动/切页瞬间先隐藏任务栏，防止任何残留闪现
-        if (taskBar != null) taskBar.setVisibility(View.GONE);
-        taskTicking = false;
         refreshActivityBar();   // 切回本页时若多智能体仍在运行，立即恢复活动条
         refreshTaskBar();       // 切回本页时若任务层仍有活动任务，立即恢复任务条
     }

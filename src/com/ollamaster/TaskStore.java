@@ -127,6 +127,13 @@ public class TaskStore {
     public static void setListener(Runnable r) { sListener = r; }
 
     private static void notifyChanged() {
+        // 启动期屏蔽：应用未就绪前不触发 UI 刷新，防止 taskBar 误显示
+        try {
+            Class<?> appCls = Class.forName("com.ollamaster.App");
+            java.lang.reflect.Field f = appCls.getDeclaredField("sStartupGuard");
+            f.setAccessible(true);
+            if (f.getBoolean(null)) return;  // 启动屏蔽期，直接返回
+        } catch (Throwable ignored) {}
         Runnable r = sListener;
         if (r == null) return;
         try { r.run(); } catch (Throwable ignored) {}
