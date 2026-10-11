@@ -268,15 +268,15 @@ public class TaskStore {
 
     // ==================== 查找 ====================
 
-    /** 取某会话当前活动任务（仅 RUNNING/PENDING/PAUSED；终态 DONE/FAILED/CANCELLED/SKIPPED 不返回） */
+    /** 取某会话当前活动任务（仅 RUNNING/PENDING；PAUSED/终态不返回，避免崩溃恢复残留误触发 UI） */
     public static Task active(Context c, String convId) {
         List<Task> all = list(c);
         Task candidate = null;
         for (Task t : all) {
             if (convId != null && !convId.isEmpty() && !convId.equals(t.convId)) continue;
             String st = t.status;
-            // 只把进行中/暂停视为活动
-            if (ST_RUNNING.equals(st) || ST_PENDING.equals(st) || ST_PAUSED.equals(st)) {
+            // 仅 RUNNING/PENDING 视为活动；PAUSED 属于「需用户显式恢复」，不自动上屏
+            if (ST_RUNNING.equals(st) || ST_PENDING.equals(st)) {
                 if (candidate == null || t.updated > candidate.updated) candidate = t;
             }
         }
