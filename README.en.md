@@ -2,7 +2,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/version-1.9.12-blue)](AndroidManifest.xml)
+[![Version](https://img.shields.io/badge/version-1.9.14-blue)](AndroidManifest.xml)
 [![Platform](https://img.shields.io/badge/platform-Android%208.0%2B-green)](#)
 [![License](https://img.shields.io/badge/license-MIT-orange)](LICENSE)
 [![Language](https://img.shields.io/badge/language-Java-4e8ee8)](#)
@@ -23,7 +23,9 @@ featuring an Agent tool loop, hot-pluggable plugin system, MCP client, browser a
 - 🧩 **Hot-pluggable plugin system**: Declarative UI JSON → native Views; install/uninstall/enable/disable on the fly, no recompilation
 - 🔌 **MCP client**: Streamable HTTP protocol support to connect external MCP servers and extend capabilities
 - 🧠 **Long-term memory**: drawer-nested categorized storage; AI can read/write/search/manage (mem_* tools + memory skill + dedicated page)
-- 🎭 **Skills & personas**: Inject custom system prompts and persona cards to shape AI behavior
+- 🎭 **Skills & personas**: 9 built-in ready-to-use skills (self-check / self-repair / memory / image generation / project scaffold / task manager / subagent / team chat / project guide) plus custom system-prompt injection and persona cards
+- 🧭 **Fixed task panel UI**: a persistent task panel at the top of the chat page — title, status, progress bar and all steps stay visible while messages scroll, synced with task data, collapsible by tapping the title row
+- 🪟 **Scrollable model list in key pool**: the provider model list now uses a capped height with free scrolling instead of being clipped
 - 🖼 **Persona avatars**: upload an image and crop it to a square in-app (aspect-ratio preserved, no stretching); AI bubble and empty state follow the persona
 - ✋ **Bubble text selection**: long-press for a message menu + a standalone full-screen text-selection panel (smooth copy / select-all)
 - 🔊 **Text-to-speech (TTS)**: Edge free / HTTP API dual channels, auto-read replies
@@ -35,8 +37,8 @@ featuring an Agent tool loop, hot-pluggable plugin system, MCP client, browser a
 
 ## 📦 Version Info
 
-- versionName: **1.9.12**
-- versionCode: **36**
+- versionName: **1.9.14**
+- versionCode: **38**
 - minSdk: **26** (Android 8.0) · targetSdk: **35**
 
 ## 🏗 Architecture Overview

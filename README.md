@@ -2,7 +2,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/version-1.9.12-blue)](AndroidManifest.xml)
+[![Version](https://img.shields.io/badge/version-1.9.14-blue)](AndroidManifest.xml)
 [![官网](https://img.shields.io/badge/%E5%AE%98%E7%BD%91-anma50509--maker.github.io-gold)](https://anma50509-maker.github.io/)
 [![Platform](https://img.shields.io/badge/platform-Android%208.0%2B-green)](#)
 [![License](https://img.shields.io/badge/license-MIT-orange)](LICENSE)
@@ -24,7 +24,9 @@
 - 🧩 **热插拔插件系统**：声明式 UI JSON → 原生 View，一键安装/卸载/启用/禁用，无需重新编译
 - 🔌 **MCP 客户端**：支持 Streamable HTTP 协议，连接外部 MCP 服务器扩展能力
 - 🧠 **长期记忆库**：抽屉式嵌套分类存储，AI 可读/写/检索/管理（mem_* 工具 + 记忆库技能 + 专属页面）
-- 🎭 **技能与人格系统**：自定义注入系统提示与人设卡，塑造 AI 行为
+- 🎭 **技能与人格系统**：内置 9 个开箱技能（完工自检 / 错误自修复 / 记忆库 / 生图助手 / 新项目脚手架 / 任务管理 / 子 Agent 委派 / 团队协作 / Ollamaster 项目指南），可自定义注入系统提示与人设卡
+- 🧭 **任务层固定 UI**：对话页顶部常驻活动任务面板——标题、状态、进度条与全部步骤（[]待执行 [>]当前 [x]已完成）不随消息滚动，与任务数据强一致刷新，点击标题行可收起
+- 🪟 **密钥池模型列表可滚动**：设置页服务商模型清单改为「上限高度 + 自由滚动」，模型很多时不再被裁掉
 - 🖼 **人设头像**：上传图片并应用内方形裁剪（保持比例不拉伸），AI 气泡与空状态跟随人设显示
 - ✋ **气泡文本选择**：长按弹消息菜单 + 独立全屏文本选择面板（顺滑复制/全选）
 - 🔊 **语音合成（TTS）**：Edge 免费 / HTTP API 双通道，自动朗读回复
@@ -38,8 +40,8 @@
 
 ## 📦 版本信息
 
-- versionName: **1.9.12**
-- versionCode: **36**
+- versionName: **1.9.14**
+- versionCode: **38**
 - minSdk: **26** (Android 8.0) · targetSdk: **35**
 
 ## 🏗 架构速览

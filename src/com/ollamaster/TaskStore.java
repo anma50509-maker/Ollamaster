@@ -121,6 +121,17 @@ public class TaskStore {
     private static List<Task> sCache = null;
     private static boolean sRecovered = false;
 
+    /** 变更通知（UI 任务条用）：任一写操作落盘后回调，保证界面与数据强一致 */
+    private static Runnable sListener = null;
+
+    public static void setListener(Runnable r) { sListener = r; }
+
+    private static void notifyChanged() {
+        Runnable r = sListener;
+        if (r == null) return;
+        try { r.run(); } catch (Throwable ignored) {}
+    }
+
     /** 读取全部任务（按更新时间倒序），首次读取时做崩溃恢复：RUNNING → PAUSED */
     public static synchronized List<Task> list(Context c) {
         if (sCache == null) {
@@ -169,6 +180,8 @@ public class TaskStore {
         final File file = f(c);
         ConvStore.io(() -> {
             try { ConvStore.write(file, s); } catch (Throwable ignored) {}
+            // 落盘后立刻通知 UI（在 IO 线程回调，UI 侧自行 post 到主线程）
+            notifyChanged();
         });
     }
 
@@ -179,6 +192,7 @@ public class TaskStore {
             for (Task t : list) arr.put(toJson(t));
             ConvStore.write(f(c), arr.toString());
         } catch (Throwable ignored) {}
+        notifyChanged();
     }
 
     private static JSONObject toJson(Task t) {

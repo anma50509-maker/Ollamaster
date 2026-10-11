@@ -131,7 +131,7 @@ RUNNING ──pause──▶ PAUSED ──resume──▶ RUNNING
 - `modelRef`：可指定独立模型（复用模型池 / `ModelEntry`）
 - `toolAllow[]`：工具白名单（子 Agent 默认**只读优先**：read_file/list_files/web_fetch/mem_*；写操作需显式授权）
 - `systemPrompt`：由 name/goal/backstory + 团队约束拼装
-- `maxRounds` / `timeoutSec`：独立预算（轮数与超时；对话采样参数自 v1.9.12 起全部交由模型/服务端默认值，不再暴露）
+- `maxRounds` / `timeoutSec`：独立预算（轮数与超时；对话采样参数自 v1.9.14 起全部交由模型/服务端默认值，不再暴露）
 
 ### 2. 运行器行为（一次「子 Agent 任务」= 一次受限的 runTurn）
 

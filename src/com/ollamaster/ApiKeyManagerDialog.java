@@ -12,6 +12,7 @@ import android.widget.BaseAdapter;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ListView;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -198,8 +199,17 @@ public class ApiKeyManagerDialog {
         final Set<String> scannedModels = new HashSet<>(edit.models);
         final LinearLayout modelsBox = new LinearLayout(act);
         modelsBox.setOrientation(LinearLayout.VERTICAL);
-        box.addView(modelsBox, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, Ui.dpi(act, 180)));
+        // 【滚动修复】模型列表必须放进 ScrollView：此前直接把 modelsBox 以固定高度
+        // （180dp）塞进 WRAP_CONTENT 的弹窗里，超出部分被裁掉且无法滚动。
+        // 现在改为「ScrollView 限定最大高度 + 内部 LinearLayout 自适应高度」，
+        // 列表短时自动收缩、长时可自由滚动，且不干扰弹窗自身的输入法适配。
+        final ScrollView modelsScroll = new MaxHeightScrollView(act, Ui.dpi(act, 168));
+        modelsScroll.setVerticalScrollBarEnabled(true);
+        modelsScroll.setFillViewport(false);
+        modelsScroll.addView(modelsBox, new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        box.addView(modelsScroll, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         final Runnable[] renderModels = {null};
         renderModels[0] = () -> {
@@ -455,6 +465,35 @@ public class ApiKeyManagerDialog {
             delBtn.setOnClickListener(v -> deleteKey(entry));
 
             return row;
+        }
+    }
+
+    /**
+     * 【滚动修复核心】带最大高度上限的 ScrollView。
+     * 弹窗链路是 FrameLayout(WRAP_CONTENT) → panel(WRAP_CONTENT) → box(WRAP_CONTENT)，
+     * 其中 LinearLayout 给子 View 的 MeasureSpec 是 AT_MOST(整个可用高度) 而不是「剩余高度」，
+     * 所以普通 ScrollView 会一口气吃掉整屏高度，把下方「手动添加/保存」按钮挤出屏幕，
+     * 表现为「列表被裁掉且无法滚动」。这里显式给一个 maxHeight：
+     * 内容不足时按内容收缩（WRAP_CONTENT 效果），内容超长时固定在上限内并可自由滚动。
+     */
+    private static class MaxHeightScrollView extends ScrollView {
+        private final int maxH;
+
+        MaxHeightScrollView(android.content.Context c, int maxH) {
+            super(c);
+            this.maxH = Math.max(1, maxH);
+        }
+
+        @Override
+        protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+            // 上限 = min(自定义最大高度, 父容器给出的可用高度)
+            int limit = maxH;
+            if (MeasureSpec.getMode(heightMeasureSpec) != MeasureSpec.UNSPECIFIED) {
+                limit = Math.min(maxH, MeasureSpec.getSize(heightMeasureSpec));
+            }
+            // 关键：用 AT_MOST 而非 EXACTLY——内容不足时按内容收缩，超出时封顶并可滚动
+            super.onMeasure(widthMeasureSpec,
+                    MeasureSpec.makeMeasureSpec(limit, MeasureSpec.AT_MOST));
         }
     }
 }

@@ -213,9 +213,14 @@ public class ChatPage extends Page {
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
         activityBar = buildActivityBar();
         root.addView(activityBar);
+        // 任务层固定 UI：活动任务的全步骤常驻显示（不随消息滚动、不占用对话流）
+        taskBar = buildTaskBar();
+        root.addView(taskBar);
         root.addView(buildComposer());
         // 多智能体可视化的实时通道：后台运行轨迹一变就刷新活动条
         AgentActivity.setListener(() -> Ui.H.post(this::refreshActivityBar));
+        // 任务层变更通知：TaskStore 任一写操作落盘后刷新任务条（与数据强一致）
+        TaskStore.setListener(() -> Ui.H.post(this::refreshTaskBar));
         return root;
     }
 
@@ -350,6 +355,246 @@ public class ChatPage extends Page {
             }
             refreshActivityBar();
         }, 500);
+    }
+
+    // ==================== 任务层固定 UI：活动任务步骤常驻面板 ====================
+
+    private LinearLayout taskBar;
+    private LinearLayout taskStepsBox;
+    private TextView taskTitle, taskMeta, taskToggle;
+    private View taskBarFill;
+    private boolean taskTicking = false;
+    private boolean taskCollapsed = false;
+    /** 渲染签名：任务结构/状态未变时跳过重建，避免流式期间反复重建步骤行拖慢 UI */
+    private String taskSig = "";
+    /** 步骤过多时的折叠上限：超过则只列前 N 步 + 汇总行，保证面板高度可控 */
+    private static final int TASK_STEP_SHOW_MAX = 10;
+
+    /** 任务条：标题 / 状态 / 进度条 / 全步骤固定列表（点击标题行可收起） */
+    private LinearLayout buildTaskBar() {
+        LinearLayout bar = new LinearLayout(act);
+        bar.setOrientation(LinearLayout.VERTICAL);
+        bar.setVisibility(View.GONE);
+        bar.setBackground(Ui.stroke(t.surfaceAlt, t.border, Ui.dpi(act, 13), Ui.dpi(act, 0.7f)));
+        int pad = Ui.dpi(act, 11);
+        bar.setPadding(pad, Ui.dpi(act, 8), pad, Ui.dpi(act, 8));
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        blp.leftMargin = Ui.dpi(act, 12);
+        blp.rightMargin = Ui.dpi(act, 12);
+        blp.bottomMargin = Ui.dpi(act, 6);
+        bar.setLayoutParams(blp);
+
+        LinearLayout row = new LinearLayout(act);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView icon = new TextView(act);
+        icon.setText("≡");
+        icon.setGravity(Gravity.CENTER);
+        icon.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 11));
+        icon.setTextColor(t.accent);
+        icon.setBackground(Ui.round(t.alpha(t.accent, 0.16f), Ui.dpi(act, 999)));
+        row.addView(icon, new LinearLayout.LayoutParams(Ui.dpi(act, 20), Ui.dpi(act, 20)));
+
+        taskTitle = new TextView(act);
+        taskTitle.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 12.5f));
+        taskTitle.setTextColor(t.textPri);
+        taskTitle.setSingleLine(true);
+        taskTitle.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        tlp.leftMargin = Ui.dpi(act, 8);
+        row.addView(taskTitle, tlp);
+
+        taskMeta = new TextView(act);
+        taskMeta.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 11));
+        taskMeta.setTextColor(t.textSec);
+        taskMeta.setSingleLine(true);
+        row.addView(taskMeta);
+
+        taskToggle = new TextView(act);
+        taskToggle.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 11));
+        taskToggle.setTextColor(t.textSec);
+        taskToggle.setSingleLine(true);
+        taskToggle.setPadding(Ui.dpi(act, 8), Ui.dpi(act, 2), Ui.dpi(act, 2), Ui.dpi(act, 2));
+        taskToggle.setOnClickListener(v -> {
+            taskCollapsed = !taskCollapsed;
+            taskSig = "";
+            refreshTaskBar();
+        });
+        row.addView(taskToggle);
+        bar.addView(row);
+
+        LinearLayout track = new LinearLayout(act);
+        track.setOrientation(LinearLayout.HORIZONTAL);
+        track.setBackground(Ui.round(t.alpha(t.textPri, 0.09f), Ui.dpi(act, 999)));
+        taskBarFill = new View(act);
+        taskBarFill.setBackground(Ui.round(t.accent, Ui.dpi(act, 999)));
+        track.addView(taskBarFill, new LinearLayout.LayoutParams(0, Ui.dpi(act, 3), 0.05f));
+        LinearLayout.LayoutParams glp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, Ui.dpi(act, 3));
+        glp.topMargin = Ui.dpi(act, 8);
+        bar.addView(track, glp);
+
+        taskStepsBox = new LinearLayout(act);
+        taskStepsBox.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        slp.topMargin = Ui.dpi(act, 7);
+        bar.addView(taskStepsBox, slp);
+        return bar;
+    }
+
+    /** 步骤状态 → 符号 / 配色（与 TaskStore 状态机一一对应） */
+    private String taskGlyph(String st) {
+        if (TaskStore.ST_COMPLETED.equals(st)) return "✓";
+        if (TaskStore.ST_RUNNING.equals(st)) return "▶";
+        if (TaskStore.ST_FAILED.equals(st)) return "✕";
+        if (TaskStore.ST_SKIPPED.equals(st)) return "~";
+        if (TaskStore.ST_CANCELLED.equals(st)) return "⊘";
+        return "○";
+    }
+
+    private int taskColor(String st) {
+        if (TaskStore.ST_COMPLETED.equals(st)) return t.ok;
+        if (TaskStore.ST_RUNNING.equals(st)) return t.accent;
+        if (TaskStore.ST_FAILED.equals(st)) return t.danger;
+        return t.textSec;
+    }
+
+    private void refreshTaskBar() {
+        if (taskBar == null || act == null) return;
+        TaskStore.Task task;
+        try {
+            task = TaskStore.active(act, conv == null ? "" : conv.id);
+        } catch (Throwable e) {
+            taskBar.setVisibility(View.GONE);
+            return;
+        }
+        if (task == null) {
+            taskBar.setVisibility(View.GONE);
+            taskTicking = false;
+            taskSig = "";
+            return;
+        }
+        String sig = task.id + "|" + task.status + "|" + task.updated + "|"
+                + task.total() + "|" + task.doneCount() + "|" + taskCollapsed
+                + "|" + (conv == null ? "" : conv.id);
+        if (!sig.equals(taskSig)) {
+            taskSig = sig;
+            rebuildTaskSteps(task);
+        }
+        taskTitle.setText(task.title == null || task.title.isEmpty() ? "未命名任务" : task.title);
+        taskMeta.setText(TaskStore.statusCn(task.status) + "  " + task.doneCount() + "/" + task.total());
+        taskToggle.setText(taskCollapsed ? "展开" : "收起");
+        taskStepsBox.setVisibility(taskCollapsed ? View.GONE : View.VISIBLE);
+        float frac = task.total() <= 0 ? 0.05f
+                : Math.max(0.05f, Math.min(1f, task.doneCount() * 1f / task.total()));
+        taskBarFill.setLayoutParams(new LinearLayout.LayoutParams(0, Ui.dpi(act, 3), frac));
+        if (taskBar.getVisibility() != View.VISIBLE) taskBar.setVisibility(View.VISIBLE);
+        // 执行中才开计时心跳（刷新耗时/状态），完成后停跳省电
+        if (TaskStore.ST_RUNNING.equals(task.status) || TaskStore.ST_PENDING.equals(task.status)) {
+            if (!taskTicking) { taskTicking = true; tickTask(); }
+        } else {
+            taskTicking = false;
+        }
+    }
+
+    private void tickTask() {
+        Ui.H.postDelayed(() -> {
+            if (!uiAlive() || taskBar == null) { taskTicking = false; return; }
+            taskTicking = false;
+            refreshTaskBar();
+        }, 800);
+    }
+
+    /** 固定布局重建：每一步一行（序号 + 状态符号 + 名称 + 工具/结果摘要），全部可见不滚动 */
+    private void rebuildTaskSteps(TaskStore.Task task) {
+        taskStepsBox.removeAllViews();
+        if (task.steps.isEmpty()) {
+            TextView empty = new TextView(act);
+            empty.setText("（尚无步骤，AI 可用 task_update action=add_step 补充）");
+            empty.setTextColor(t.textSec);
+            empty.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 11));
+            empty.setPadding(Ui.dpi(act, 2), Ui.dpi(act, 2), Ui.dpi(act, 2), Ui.dpi(act, 2));
+            taskStepsBox.addView(empty);
+            return;
+        }
+        int show = task.steps.size();
+        boolean clipped = show > TASK_STEP_SHOW_MAX;
+        if (clipped) show = TASK_STEP_SHOW_MAX;
+        for (int i = 0; i < show; i++) {
+            TaskStore.Step st = task.steps.get(i);
+            String status = st.status == null ? TaskStore.ST_PENDING : st.status;
+            int color = taskColor(status);
+            boolean cur = TaskStore.ST_RUNNING.equals(status);
+
+            LinearLayout srow = new LinearLayout(act);
+            srow.setOrientation(LinearLayout.HORIZONTAL);
+            srow.setGravity(Gravity.CENTER_VERTICAL);
+            int rp = Ui.dpi(act, 5);
+            srow.setPadding(rp, rp, rp, rp);
+            srow.setBackground(Ui.round(t.alpha(color, cur ? 0.13f : 0.05f), Ui.dpi(act, 9)));
+            LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            if (i > 0) rlp.topMargin = Ui.dpi(act, 3);
+
+            TextView glyph = new TextView(act);
+            glyph.setText(taskGlyph(status));
+            glyph.setGravity(Gravity.CENTER);
+            glyph.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 10));
+            glyph.setTextColor(color);
+            glyph.setBackground(Ui.round(t.alpha(color, 0.18f), Ui.dpi(act, 999)));
+            srow.addView(glyph, new LinearLayout.LayoutParams(Ui.dpi(act, 17), Ui.dpi(act, 17)));
+
+            LinearLayout col = new LinearLayout(act);
+            col.setOrientation(LinearLayout.VERTICAL);
+            LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(0,
+                    ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+            clp.leftMargin = Ui.dpi(act, 7);
+            col.setLayoutParams(clp);
+
+            TextView name = new TextView(act);
+            name.setText((i + 1) + ". " + (st.name == null ? "" : st.name));
+            name.setTextColor(cur ? t.textPri : t.alpha(t.textPri, 0.86f));
+            name.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 11.5f));
+            name.setSingleLine(true);
+            name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            if (cur) name.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+            col.addView(name);
+
+            StringBuilder metaSb = new StringBuilder();
+            if (st.toolName != null && !st.toolName.isEmpty()) metaSb.append("<").append(st.toolName).append(">");
+            if (st.attempts > 1) metaSb.append(metaSb.length() > 0 ? "  " : "").append("尝试 ").append(st.attempts).append(" 次");
+            if (st.result != null && !st.result.isEmpty()) {
+                String r = st.result.replace('\n', ' ').replace('\r', ' ').trim();
+                if (r.length() > 60) r = r.substring(0, 60) + "…";
+                metaSb.append(metaSb.length() > 0 ? "  ·  " : "").append(r);
+            }
+            if (metaSb.length() > 0) {
+                TextView meta = new TextView(act);
+                meta.setText(metaSb.toString());
+                meta.setTextColor(t.textSec);
+                meta.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 10));
+                meta.setSingleLine(true);
+                meta.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                meta.setTypeface(Ui.mono());
+                col.addView(meta);
+            }
+            srow.addView(col);
+            taskStepsBox.addView(srow, rlp);
+        }
+        if (clipped) {
+            TextView more = new TextView(act);
+            more.setText("…另有 " + (task.steps.size() - show) + " 步未展开（task_status 可查看完整列表）");
+            more.setTextColor(t.textSec);
+            more.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 10.5f));
+            LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            mlp.topMargin = Ui.dpi(act, 4);
+            taskStepsBox.addView(more, mlp);
+        }
     }
 
     private View buildToolbar() {
@@ -2986,6 +3231,7 @@ public class ChatPage extends Page {
         refreshViews();
         refreshEmpty();
         refreshActivityBar();   // 切回本页时若多智能体仍在运行，立即恢复活动条
+        refreshTaskBar();       // 切回本页时若任务层仍有活动任务，立即恢复任务条
     }
 
     /** 供 AI 工具（create_persona/delete_persona 等）操作人设库后刷新界面 */
