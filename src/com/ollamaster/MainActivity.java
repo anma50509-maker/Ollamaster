@@ -102,6 +102,8 @@ public class MainActivity extends Activity {
         rebuildNav();
         switchTo("chat");
         handleSeed();
+        // 启动完成，解除 taskBar 显示屏蔽
+        App.markStartupDone();
     }
 
     private void handleSeed() {

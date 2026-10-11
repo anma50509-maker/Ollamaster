@@ -374,7 +374,7 @@ public class ChatPage extends Page {
     private LinearLayout buildTaskBar() {
         LinearLayout bar = new LinearLayout(act);
         bar.setOrientation(LinearLayout.VERTICAL);
-        bar.setVisibility(View.GONE);
+        bar.setVisibility(View.GONE);  // 默认隐藏，仅在有活动任务且 conv 就绪时显示
         bar.setBackground(Ui.stroke(t.surfaceAlt, t.border, Ui.dpi(act, 13), Ui.dpi(act, 0.7f)));
         int pad = Ui.dpi(act, 11);
         bar.setPadding(pad, Ui.dpi(act, 8), pad, Ui.dpi(act, 8));
@@ -465,9 +465,21 @@ public class ChatPage extends Page {
 
     private void refreshTaskBar() {
         if (taskBar == null || act == null) return;
+        // 启动期全局屏蔽：应用未完全就绪前，绝不显示任务栏
+        if (App.sStartupGuard) {
+            taskBar.setVisibility(View.GONE);
+            taskTicking = false;
+            return;
+        }
+        // 无当前会话（conv 为 null）时不显示任务条，避免启动/切页误触发
+        if (conv == null) {
+            taskBar.setVisibility(View.GONE);
+            taskTicking = false;
+            return;
+        }
         TaskStore.Task task;
         try {
-            task = TaskStore.active(act, conv == null ? "" : conv.id);
+            task = TaskStore.active(act, conv.id);
         } catch (Throwable e) {
             taskBar.setVisibility(View.GONE);
             return;
@@ -476,6 +488,19 @@ public class ChatPage extends Page {
             taskBar.setVisibility(View.GONE);
             taskTicking = false;
             taskSig = "";
+            return;
+        }
+        // 双重校验：任务必须属于当前会话（防止跨会话泄漏）
+        if (conv.id == null || !conv.id.equals(task.convId)) {
+            taskBar.setVisibility(View.GONE);
+            taskTicking = false;
+            return;
+        }
+        // 仅 RUNNING 状态才显示任务栏；PENDING/PAUSED/终态均隐藏
+        String st = task.status;
+        if (!TaskStore.ST_RUNNING.equals(st)) {
+            taskBar.setVisibility(View.GONE);
+            taskTicking = false;
             return;
         }
         String sig = task.id + "|" + task.status + "|" + task.updated + "|"
@@ -492,14 +517,7 @@ public class ChatPage extends Page {
         float frac = task.total() <= 0 ? 0.05f
                 : Math.max(0.05f, Math.min(1f, task.doneCount() * 1f / task.total()));
         taskBarFill.setLayoutParams(new LinearLayout.LayoutParams(0, Ui.dpi(act, 3), frac));
-        // 终态（DONE/FAILED/CANCELLED）→ 自动隐藏 taskBar，不再显示
-        if (TaskStore.ST_DONE.equals(task.status)
-                || TaskStore.ST_FAILED.equals(task.status)
-                || TaskStore.ST_CANCELLED.equals(task.status)) {
-            taskBar.setVisibility(View.GONE);
-            taskTicking = false;
-            return;
-        }
+        // 兜底检查已在前面完成，此处直接显示
         if (taskBar.getVisibility() != View.VISIBLE) taskBar.setVisibility(View.VISIBLE);
         // 执行中才开计时心跳（刷新耗时/状态），完成后停跳省电
         if (TaskStore.ST_RUNNING.equals(task.status) || TaskStore.ST_PENDING.equals(task.status)) {
@@ -511,7 +529,15 @@ public class ChatPage extends Page {
 
     private void tickTask() {
         Ui.H.postDelayed(() -> {
-            if (!uiAlive() || taskBar == null) { taskTicking = false; return; }
+            if (!uiAlive() || taskBar == null || conv == null) { taskTicking = false; return; }
+            // 心跳再次确认：只有 RUNNING 且属于当前会话才继续刷新
+            TaskStore.Task task = TaskStore.active(act, conv.id);
+            if (task == null || !TaskStore.ST_RUNNING.equals(task.status)
+                    || (conv.id != null && !conv.id.equals(task.convId))) {
+                taskBar.setVisibility(View.GONE);
+                taskTicking = false;
+                return;
+            }
             taskTicking = false;
             refreshTaskBar();
         }, 800);
@@ -1190,6 +1216,7 @@ public class ChatPage extends Page {
         refreshViews();
         updateChips();
         refreshEmpty();
+        refreshTaskBar();       // 会话加载后刷新任务条（按 conv.id 精准匹配）
         scrollBottom();
     }
 
@@ -3238,6 +3265,9 @@ public class ChatPage extends Page {
         loadModels();
         refreshViews();
         refreshEmpty();
+        // 启动/切页瞬间先隐藏任务栏，防止任何残留闪现
+        if (taskBar != null) taskBar.setVisibility(View.GONE);
+        taskTicking = false;
         refreshActivityBar();   // 切回本页时若多智能体仍在运行，立即恢复活动条
         refreshTaskBar();       // 切回本页时若任务层仍有活动任务，立即恢复任务条
     }

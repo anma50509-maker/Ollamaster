@@ -7,8 +7,14 @@ import android.os.Bundle;
 public class App extends Application {
     public static App inst;
 
+    /** 启动期屏蔽标记：true=全局拦截 taskBar 显示，直到 MainActivity 完全就绪 */
+    public static volatile boolean sStartupGuard = true;
+
     /** 已 started（含后台可见）的 Activity 计数，>0 说明应用处于前台 */
     private static int sStarted = 0;
+
+    /** 标记启动完成，允许 taskBar 正常工作（在 MainActivity.onResume/页面就绪后调用） */
+    public static void markStartupDone() { sStartupGuard = false; }
 
     /** 应用是否处于前台：AgentService 启动前台服务前的安全闸门 */
     public static boolean isForeground() {
