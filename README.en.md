@@ -2,7 +2,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/version-1.9.14-blue)](AndroidManifest.xml)
+[![Version](https://img.shields.io/badge/version-1.9.15-blue)](AndroidManifest.xml)
 [![Platform](https://img.shields.io/badge/platform-Android%208.0%2B-green)](#)
 [![License](https://img.shields.io/badge/license-MIT-orange)](LICENSE)
 [![Language](https://img.shields.io/badge/language-Java-4e8ee8)](#)
@@ -37,8 +37,8 @@ featuring an Agent tool loop, hot-pluggable plugin system, MCP client, browser a
 
 ## 📦 Version Info
 
-- versionName: **1.9.14**
-- versionCode: **38**
+- versionName: **1.9.15**
+- versionCode: **39****
 - minSdk: **26** (Android 8.0) · targetSdk: **35**
 
 ## 🏗 Architecture Overview

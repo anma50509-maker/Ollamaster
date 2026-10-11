@@ -492,6 +492,14 @@ public class ChatPage extends Page {
         float frac = task.total() <= 0 ? 0.05f
                 : Math.max(0.05f, Math.min(1f, task.doneCount() * 1f / task.total()));
         taskBarFill.setLayoutParams(new LinearLayout.LayoutParams(0, Ui.dpi(act, 3), frac));
+        // 终态（DONE/FAILED/CANCELLED）→ 自动隐藏 taskBar，不再显示
+        if (TaskStore.ST_DONE.equals(task.status)
+                || TaskStore.ST_FAILED.equals(task.status)
+                || TaskStore.ST_CANCELLED.equals(task.status)) {
+            taskBar.setVisibility(View.GONE);
+            taskTicking = false;
+            return;
+        }
         if (taskBar.getVisibility() != View.VISIBLE) taskBar.setVisibility(View.VISIBLE);
         // 执行中才开计时心跳（刷新耗时/状态），完成后停跳省电
         if (TaskStore.ST_RUNNING.equals(task.status) || TaskStore.ST_PENDING.equals(task.status)) {

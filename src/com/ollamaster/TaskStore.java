@@ -556,18 +556,26 @@ public class TaskStore {
         t.status = ST_DONE;
         t.updated = now;
         t.endedAt = now;
+        // 任务到达终态 → 立即通知 UI（刷新 taskBar 并自动隐藏）
+        notifyChanged();
     }
 
     public static void setTaskStatus(Task t, String st) {
         t.status = st;
         t.updated = System.currentTimeMillis();
-        if (ST_DONE.equals(st) || ST_FAILED.equals(st) || ST_CANCELLED.equals(st)) t.endedAt = t.updated;
+        if (ST_DONE.equals(st) || ST_FAILED.equals(st) || ST_CANCELLED.equals(st)) {
+            t.endedAt = t.updated;
+            // 任务到达终态 → 立即通知 UI
+            notifyChanged();
+        }
     }
 
     public static void remove(Context c, Task t) {
         List<Task> all = list(c);
         all.remove(t);
         saveAll(c, all);
+        // 删除后也通知（会触发 UI 重新检测活动任务）
+        notifyChanged();
     }
 
     // ==================== 工具实现 ====================
