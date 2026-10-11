@@ -268,16 +268,19 @@ public class TaskStore {
 
     // ==================== 查找 ====================
 
-    /** 取某会话当前活动任务（PENDING/RUNNING/PAUSED 中最近更新的一个；无则返回最近一个） */
+    /** 取某会话当前活动任务（仅 RUNNING/PENDING/PAUSED；终态 DONE/FAILED/CANCELLED/SKIPPED 不返回） */
     public static Task active(Context c, String convId) {
         List<Task> all = list(c);
-        Task newest = null;
+        Task candidate = null;
         for (Task t : all) {
             if (convId != null && !convId.isEmpty() && !convId.equals(t.convId)) continue;
-            if (newest == null || t.updated > newest.updated) newest = t;
-            if (ST_RUNNING.equals(t.status) || ST_PENDING.equals(t.status)) return t;
+            String st = t.status;
+            // 只把进行中/暂停视为活动
+            if (ST_RUNNING.equals(st) || ST_PENDING.equals(st) || ST_PAUSED.equals(st)) {
+                if (candidate == null || t.updated > candidate.updated) candidate = t;
+            }
         }
-        return newest;
+        return candidate;  // 无活动任务返回 null
     }
 
     public static Task find(Context c, String id) {
