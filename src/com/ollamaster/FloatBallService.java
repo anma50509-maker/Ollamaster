@@ -10,42 +10,42 @@ import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.PixelFormat;
 import android.graphics.RectF;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.PowerManager;
 import android.provider.Settings;
-import android.graphics.drawable.GradientDrawable;
-import android.view.MotionEvent;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
-import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
-/** 悬浮球服务：Material 3 圆环进度 + 标题跑马灯 + 状态芯片，前台保活 */
+/**
+ * 悬浮球服务：任务进度可视化 + 前台保活
+ * - 紧凑圆形卡片：圆环进度 + 标题跑马灯 + 状态芯片，总宽度 ≤ 240dp
+ * - 即时刷新：TaskStore 变更直接 post 到主线程，去抖 16ms
+ * - 点击行为：聚焦现有 MainActivity 并打开任务面板，不新建会话
+ */
 public class FloatBallService extends Service {
     private static final String CH = "ollamaster_float";
     private static final int NOTIF_ID = 1002;
-    private static final String TAG = "ollamaster_float";
+    private static final String TAG = "ollamaster_float_ball";
 
     private static volatile boolean sRunning = false;
-    private static FloatBallService sSelf;
 
     private WindowManager wm;
-    private FrameLayout ballRoot;
+    private View ballRoot;
+    private ProgressRing progressRing;
     private TextView titleView;
     private TextView badgeView;
-    private ProgressRing progressRing;
-
     private Handler H;
-    private Runnable refreshRunner;
-
     private PowerManager.WakeLock wake;
+
     private String cachedTitle = "";
-    private int cachedDone = 0, cachedTotal = 0;
     private String cachedStatus = "";
 
     public static boolean isRunning() { return sRunning; }
@@ -72,14 +72,61 @@ public class FloatBallService extends Service {
         sRunning = false;
     }
 
-    /** 任务数据变化通知（TaskStore 回调转发），去抖动刷新 */
+    /** 任务数据变化通知：即时刷新（去抖 16ms） */
     public static void notifyTasks() {
         if (!sRunning) return;
         FloatBallService s = sSelf;
         if (s != null) {
             s.H.removeCallbacks(s.refreshRunner);
-            s.H.postDelayed(s.refreshRunner, 100);
+            s.H.postDelayed(s.refreshRunner, 16);
         }
+    }
+
+    private static FloatBallService sSelf;
+    private Runnable refreshRunner;
+
+    // ===== 视图：圆环进度条 =====
+    private static class ProgressRing extends View {
+        private final Paint bgPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint fgPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final RectF rect = new RectF();
+        private float progress = 0f; // 0-360
+        private float strokeWidth;
+
+        ProgressRing(Context ctx) {
+            super(ctx);
+            bgPaint.setStyle(Paint.Style.STROKE);
+            bgPaint.setStrokeCap(Paint.Cap.ROUND);
+            bgPaint.setColor(0x30FFFFFF);
+            fgPaint.setStyle(Paint.Style.STROKE);
+            fgPaint.setStrokeCap(Paint.Cap.ROUND);
+            fgPaint.setColor(0xFF00E676);
+        }
+
+        @Override
+        protected void onSizeChanged(int w, int h, int ow, int oh) {
+            super.onSizeChanged(w, h, ow, oh);
+            strokeWidth = Math.max(2.5f, Math.min(w, h) / 14f);
+            bgPaint.setStrokeWidth(strokeWidth);
+            fgPaint.setStrokeWidth(strokeWidth);
+            int pad = (int) (strokeWidth / 2 + 0.5f);
+            rect.set(pad, pad, w - pad, h - pad);
+        }
+
+        void setProgress(float p) {
+            progress = Math.max(0f, Math.min(360f, p));
+            invalidate();
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            canvas.drawArc(rect, -90, 360, false, bgPaint);
+            if (progress > 0.5f) {
+                canvas.drawArc(rect, -90, progress, false, fgPaint);
+            }
+        }
+
+        float getProgress() { return progress; }
     }
 
     @Override
@@ -101,9 +148,10 @@ public class FloatBallService extends Service {
         H.post(refreshRunner);
     }
 
+
     private void onStoreChanged() {
         H.removeCallbacks(refreshRunner);
-        H.postDelayed(refreshRunner, 100);
+        H.postDelayed(refreshRunner, 16);
     }
 
     @Override
@@ -158,36 +206,28 @@ public class FloatBallService extends Service {
         } catch (Throwable ignored) {}
     }
 
-    /** 添加悬浮球：Material 3 卡片 + 圆环进度 + 标题跑马灯 + 状态芯片 */
+    /** 添加悬浮球：紧凑圆形卡片，总宽度 ≤ 240dp */
     private void addBall() {
         wm = (WindowManager) getSystemService(WINDOW_SERVICE);
-        ballRoot = new FrameLayout(this);
-        ballRoot.setPadding(dp(4), dp(4), dp(4), dp(4));
 
-        // 背景卡片：圆角矩形，材质阴影
-        View cardBg = new View(this);
-        GradientDrawable bg = new GradientDrawable();
-        bg.setShape(GradientDrawable.RECTANGLE);
-        bg.setCornerRadius(dp(16));
-        bg.setColor(0xFF1E1E2E);
-        bg.setStroke(dp(1), 0x30FFFFFF);
-        cardBg.setBackground(bg);
-        cardBg.setElevation(dp(8));
-        ballRoot.addView(cardBg, new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
-
-        // 主内容区：水平 LinearLayout
+        // 根布局：水平 LinearLayout，直接作为悬浮窗内容
         LinearLayout content = new LinearLayout(this);
         content.setOrientation(LinearLayout.HORIZONTAL);
         content.setGravity(Gravity.CENTER_VERTICAL);
-        content.setPadding(dp(12), dp(8), dp(12), dp(8));
-        FrameLayout.LayoutParams clp = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER);
-        ballRoot.addView(content, clp);
+        content.setPadding(dp(12), dp(10), dp(12), dp(10));
 
-        // 进度环（左侧）
+        // 背景：圆角矩形卡片
+        GradientDrawable bg = new GradientDrawable();
+        bg.setShape(GradientDrawable.RECTANGLE);
+        bg.setCornerRadius(dp(20));
+        bg.setColor(0xFF1E1E2E);
+        bg.setStroke(dp(1), 0x30FFFFFF);
+        content.setBackground(bg);
+        content.setElevation(dp(8));
+
+        // 进度环（左侧，固定 36dp）
         progressRing = new ProgressRing(this);
-        int ringSize = dp(40);
+        int ringSize = dp(36);
         content.addView(progressRing, new LinearLayout.LayoutParams(ringSize, ringSize));
 
         // 文字区（右侧，垂直）
@@ -197,6 +237,7 @@ public class FloatBallService extends Service {
         LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         tlp.leftMargin = dp(10);
+        tlp.rightMargin = dp(4);
         content.addView(textArea, tlp);
 
         titleView = new TextView(this);
@@ -208,20 +249,20 @@ public class FloatBallService extends Service {
         titleView.setSelected(true);
         titleView.setSingleLine(true);
         titleView.setShadowLayer(1, 0, 1, 0x80000000);
+        titleView.setMaxWidth(dp(160));
         textArea.addView(titleView);
 
         badgeView = new TextView(this);
         badgeView.setTextColor(0xFF00E676);
         badgeView.setTextSize(android.util.TypedValue.COMPLEX_UNIT_DIP, 10);
         badgeView.setShadowLayer(0.5f, 0, 1, 0x60000000);
+        badgeView.setMaxWidth(dp(160));
         LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         blp.topMargin = dp(2);
         textArea.addView(badgeView, blp);
 
-        // 触摸拖拽
-        final int[] down = new int[2];
-        final boolean[] moved = {false};
+        // 窗口参数：WRAP_CONTENT，由内容决定尺寸（内容已被 maxWidth 限制）
         final WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.WRAP_CONTENT,
@@ -230,10 +271,13 @@ public class FloatBallService extends Service {
                         | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
                 PixelFormat.TRANSLUCENT);
         lp.gravity = Gravity.TOP | Gravity.START;
-        lp.x = dp(12);
+        lp.x = dp(16);
         lp.y = dp(180);
 
-        ballRoot.setOnTouchListener((v, ev) -> {
+        // 触摸拖拽
+        final int[] down = new int[2];
+        final boolean[] moved = {false};
+        content.setOnTouchListener((v, ev) -> {
             switch (ev.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
                     down[0] = (int) ev.getRawX() - lp.x;
@@ -245,30 +289,40 @@ public class FloatBallService extends Service {
                     int ny = (int) ev.getRawY() - down[1];
                     if (Math.abs(nx - lp.x) > dp(4) || Math.abs(ny - lp.y) > dp(4)) moved[0] = true;
                     lp.x = nx; lp.y = ny;
-                    try { wm.updateViewLayout(ballRoot, lp); } catch (Throwable ignored) {}
+                    // 边界限制
+                    int sw = wm.getDefaultDisplay().getWidth();
+                    int sh = wm.getDefaultDisplay().getHeight();
+                    int bw = content.getWidth();
+                    int bh = content.getHeight();
+                    lp.x = Math.max(0, Math.min(sw - bw, lp.x));
+                    lp.y = Math.max(0, Math.min(sh - bh, lp.y));
+                    try { wm.updateViewLayout(content, lp); } catch (Throwable ignored) {}
+                    // 不要更新 down 数组！down 始终保持「触摸点相对窗口左上角的偏移」
                     break;
                 }
                 case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
                     if (!moved[0]) {
-                        // 点击：聚焦 MainActivity 并滚动到任务面板
                         Intent it = new Intent(this, MainActivity.class);
                         it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
                         it.putExtra("scrollToTask", true);
                         try { startActivity(it); } catch (Throwable ignored) {}
                     }
+                    moved[0] = false;
                     break;
             }
             return true;
         });
 
-        try { wm.addView(ballRoot, lp); } catch (Throwable e) { stopSelf(); }
+        try { wm.addView(content, lp); } catch (Throwable e) { stopSelf(); }
+        ballRoot = content; // 复用引用，onDestroy 时用
     }
 
-    /** 刷新：标题 + 圆环进度 + 状态芯片（仅数据变化时 invalidate） */
+    /** 刷新：标题 + 圆环进度 + 状态芯片（仅数据变化时更新） */
     private void refresh() {
         if (ballRoot == null) return;
         try {
-            TaskStore.Task cur = TaskStore.active(this, null);  // 含 PENDING/PAUSED/RUNNING
+            TaskStore.Task cur = TaskStore.active(this, null);
             String title, sub;
             float sweep = 0f;
             if (cur == null) {
@@ -281,7 +335,6 @@ public class FloatBallService extends Service {
                     sweep = 360f * cur.doneCount() / cur.total();
                 }
             }
-            // 仅变化时更新
             if (!title.equals(cachedTitle)) {
                 cachedTitle = title;
                 titleView.setText(title);
@@ -298,48 +351,5 @@ public class FloatBallService extends Service {
 
     private int dp(float v) {
         return Math.round(v * getResources().getDisplayMetrics().density);
-    }
-
-    /** 自定义圆环进度 View：Material 3 规范 */
-    private static class ProgressRing extends View {
-        private final Paint bgPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint fgPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private float progress = 0f; // 0-360
-
-        ProgressRing(Context c) {
-            super(c);
-            bgPaint.setStyle(Paint.Style.STROKE);
-            bgPaint.setStrokeWidth(dp(c, 3f));
-            bgPaint.setStrokeCap(Paint.Cap.ROUND);
-            bgPaint.setColor(0x30FFFFFF);
-
-            fgPaint.setStyle(Paint.Style.STROKE);
-            fgPaint.setStrokeWidth(dp(c, 3f));
-            fgPaint.setStrokeCap(Paint.Cap.ROUND);
-            fgPaint.setColor(0xFF00E676);
-        }
-
-        private int dp(Context c, float v) {
-            return Math.round(v * c.getResources().getDisplayMetrics().density);
-        }
-
-        void setProgress(float p) {
-            progress = Math.max(0, Math.min(360, p));
-            postInvalidate();
-        }
-
-        float getProgress() { return progress; }
-
-        @Override
-        protected void onDraw(Canvas canvas) {
-            int w = getWidth(), h = getHeight();
-            int r = Math.min(w, h) / 2 - dp(getContext(), 3);
-            RectF oval = new RectF(dp(getContext(), 3), dp(getContext(), 3),
-                    w - dp(getContext(), 3), h - dp(getContext(), 3));
-            canvas.drawCircle(w/2f, h/2f, r, bgPaint);
-            if (progress > 0) {
-                canvas.drawArc(oval, -90, progress, false, fgPaint);
-            }
-        }
     }
 }

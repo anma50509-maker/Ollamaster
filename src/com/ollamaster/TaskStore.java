@@ -286,8 +286,10 @@ public class TaskStore {
     public static Task active(Context c, String convId) {
         List<Task> all = list(c);
         Task candidate = null;
+        // 空串或 null 都视为「不按会话过滤」
+        String filterConvId = (convId != null && !convId.isEmpty()) ? convId : null;
         for (Task t : all) {
-            if (convId != null && !convId.isEmpty() && !convId.equals(t.convId)) continue;
+            if (filterConvId != null && !filterConvId.equals(t.convId)) continue;
             String st = t.status;
             int prio = priority(st);
             if (prio < 0) continue;  // 已完成/失败/取消等终态跳过
@@ -478,8 +480,9 @@ public class TaskStore {
     public static Task create(Context c, String convId, String title, String desc, String stepsJson) {
         List<Task> all = list(c);
         // 调度边界：同会话同时只允许一个未结束任务
+        String filterConvId = (convId != null && !convId.isEmpty()) ? convId : null;
         for (Task x : all) {
-            if (convId != null && convId.equals(x.convId)
+            if (filterConvId != null && filterConvId.equals(x.convId)
                     && (ST_RUNNING.equals(x.status) || ST_PENDING.equals(x.status) || ST_PAUSED.equals(x.status))) {
                 return null; // 交由上层提示「已有进行中任务」
             }
@@ -622,7 +625,9 @@ public class TaskStore {
     }
 
     public static String toolStatus(Context c, String convId, String taskId) {
-        Task t = (taskId == null || taskId.trim().isEmpty()) ? active(c, convId) : find(c, taskId.trim());
+        // 空串视同无过滤
+        String filterConvId = (convId != null && !convId.isEmpty()) ? convId : null;
+        Task t = (taskId == null || taskId.trim().isEmpty()) ? active(c, filterConvId) : find(c, taskId.trim());
         if (t == null && (taskId == null || taskId.trim().isEmpty())) {
             return "（当前会话没有任务。可用 task_create 创建并拆解步骤）";
         }
@@ -649,7 +654,8 @@ public class TaskStore {
     public static String toolUpdate(Context c, String convId, JSONObject args) {
         String action = args.optString("action", "").trim();
         String taskId = args.optString("task_id", "").trim();
-        Task t = taskId.isEmpty() ? active(c, convId) : find(c, taskId);
+        String filterConvId = (convId != null && !convId.isEmpty()) ? convId : null;
+        Task t = taskId.isEmpty() ? active(c, filterConvId) : find(c, taskId);
         if (t == null) return "未找到任务（task_id=" + taskId + "），可用 task_list 查看。";
 
         boolean ok = true;
