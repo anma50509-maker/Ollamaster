@@ -107,6 +107,10 @@ public class Prefs {
     public String ttsVoice() { return sp.getString("ttsVoice", "alloy"); }
     public void ttsVoice(String v) { sp.edit().putString("ttsVoice", v).apply(); }
 
+    /** Edge 引擎专用声音（与 HTTP 模式的 ttsVoice 分离，避免互相污染）。空=用默认 */
+    public String ttsEdgeVoice() { return sp.getString("ttsEdgeVoice", ""); }
+    public void ttsEdgeVoice(String v) { sp.edit().putString("ttsEdgeVoice", v).apply(); }
+
     public float ttsSpeed() { return sp.getFloat("ttsSpeed", 1.0f); }
     public void ttsSpeed(float v) { sp.edit().putFloat("ttsSpeed", v).apply(); }
 

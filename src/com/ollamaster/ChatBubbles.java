@@ -318,6 +318,33 @@ class ChatBubbles {
         });
         col.addView(meta);
 
+        // 朗读按钮：聊天页直接点击播放本条回复（无需长按进菜单）；流式生成中的气泡不显示
+        if (!cp.streaming || m != cp.streamMsg) {
+            final String speechForBtn = ChatPage.stripForSpeech(m.content);
+            if (!speechForBtn.isEmpty()) {
+                LinearLayout actRow = new LinearLayout(act);
+                actRow.setOrientation(LinearLayout.HORIZONTAL);
+                TextView speakBtn = new TextView(act);
+                speakBtn.setText("朗读");
+                speakBtn.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 10.5f));
+                speakBtn.setTextColor(t.accent);
+                speakBtn.setPadding(Ui.dpi(act, 9), Ui.dpi(act, 3), Ui.dpi(act, 9), Ui.dpi(act, 3));
+                speakBtn.setBackground(Ui.round(t.alpha(t.accent, 0.10f), Ui.dpi(act, 9)));
+                speakBtn.setCompoundDrawablePadding(Ui.dpi(act, 3));
+                Icon.pinLeft(speakBtn, "voice", 12);
+                speakBtn.setOnClickListener(v -> {
+                    TtsEngine.get(act).speak(speechForBtn);
+                    Ui.toast(act, "正在朗读本条回复…");
+                });
+                actRow.addView(speakBtn);
+                LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                slp.topMargin = Ui.dpi(act, 4);
+                slp.leftMargin = Ui.dpi(act, 2);
+                col.addView(actRow, slp);
+            }
+        }
+
         row.addView(col, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 

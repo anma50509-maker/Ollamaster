@@ -83,18 +83,35 @@ public class TtsEngine {
             return;
         }
         Prefs p = Prefs.get(ctx);
+        Ui.H.removeCallbacks(watchdog);
+        Ui.H.postDelayed(watchdog, 150000L);
         String mode = p.ttsMode();
         if ("http".equalsIgnoreCase(mode)) {
             speakHttp(p, t);
+        } else if ("system".equalsIgnoreCase(mode)) {
+            speakSystem(t);
         } else {
-            // 系统引擎已移除，默认使用 Edge 免费引擎
             speakEdge(t);
         }
     }
 
+    /** 看门狗：若某条目超过 150 秒仍未回调完成，强制复位并继续队列（防止 playing 悬挂） */
+    private final Runnable watchdog = () -> {
+        synchronized (queue) {
+            if (!playing) return;
+            playing = false;
+        }
+        busy = false;
+        closeEdge();
+        stopPlayer();
+        Ui.toast(App.inst, "朗读超时，已跳过");
+        pumpQueue();
+    };
+
     /** 当前条目播放完成（或失败），播放下一条 */
     private void itemDone() {
         Ui.H.post(() -> {
+            Ui.H.removeCallbacks(watchdog);
             synchronized (queue) { playing = false; }
             pumpQueue();
         });
@@ -310,12 +327,12 @@ public class TtsEngine {
         // —— WebSocket 握手 ——
         String secKey = java.util.Base64.getEncoder().encodeToString(new byte[]{1,2,3,4,5,6,7,8,9,0,1,2,3,4,5,6});
         String connId = connectId();                       // 小写hex
-        String gec = generateSecMsGec();
+        String gec = EdgeDrm.generateToken(System.currentTimeMillis() / 1000.0);
         String path = "/consumer/speech/synthesize/readaloud/edge/v1"
                 + "?TrustedClientToken=6A5AA1D4EAFF4E9FB37E23D68491D6F4"
                 + "&ConnectionId=" + connId
                 + "&Sec-MS-GEC=" + gec
-                + "&Sec-MS-GEC-Version=1-143.0.3650.75";
+                + "&Sec-MS-GEC-Version=2-143.0.3650.75";
         String muid = java.util.UUID.randomUUID().toString().replace("-", "").toUpperCase();
         String hs = "GET " + path + " HTTP/1.1\r\n"
                 + "Host: speech.platform.bing.com\r\n"
@@ -372,26 +389,6 @@ public class TtsEngine {
         return audioBytes > 0;
     }
 
-    /** 生成 Sec-MS-GEC 令牌（对齐 edge-tts 算法）：
-     *  unix秒 + 11644473600(1601→1970偏移) → 向下取整到5分钟 → ×1e7 转100ns
-     *  → 拼接 TRUSTED_CLIENT_TOKEN → SHA256 大写 */
-    private static String generateSecMsGec() throws Exception {
-        long unix = System.currentTimeMillis() / 1000;
-        long ticks = unix + 11644473600L;      // WIN_EPOCH 秒
-        ticks -= ticks % 300L;                 // 取整到最近5分钟
-        ticks *= 10_000_000L;                  // 100ns 间隔
-        String src = ticks + "6A5AA1D4EAFF4E9FB37E23D68491D6F4"; // 拼接 client token！
-        java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
-        byte[] d = md.digest(src.getBytes("US-ASCII"));
-        StringBuilder sb = new StringBuilder();
-        for (byte b : d) {
-            String h = Integer.toHexString(b & 0xFF);
-            if (h.length() < 2) sb.append('0');
-            sb.append(h);
-        }
-        return sb.toString().toUpperCase(Locale.US);
-    }
-
     /** JavaScript 风格时间戳（对齐 edge-tts date_to_string） */
     private static String jsDate() {
         java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("EEE MMM dd yyyy HH:mm:ss 'GMT+0000 (Coordinated Universal Time)'", Locale.US);
@@ -415,8 +412,10 @@ public class TtsEngine {
     }
 
     private String buildSsml(String text, String ts) {
-        String voice = Prefs.get(ctx).ttsVoice().trim();
-        if (voice.isEmpty()) voice = "zh-CN-XiaoxiaoNeural";
+        // 仅用 Edge 专用声音；必须是 Edge 神经语音名（*Neural），
+        // 否则服务端会 CLOSE 1007 且不返回音频（表现为「未收到音频」）
+        String voice = Prefs.get(ctx).ttsEdgeVoice().trim();
+        if (voice.isEmpty() || !voice.endsWith("Neural")) voice = "zh-CN-XiaoxiaoNeural";
         float speed = Prefs.get(ctx).ttsSpeed();
         int ratePct = Math.round((speed - 1.0f) * 100);
         String rate = (ratePct >= 0 ? "+" : "") + ratePct + "%";
@@ -558,12 +557,14 @@ public class TtsEngine {
 
     public void stop() {
         pendingText = null;
-        synchronized (queue) { queue.clear(); }
+        // 关键：清空队列的同时必须复位 playing，
+        // 否则下一次 speak() 只会入队、pumpQueue() 因 playing==true 直接返回，朗读永久卡死
+        synchronized (queue) {
+            queue.clear();
+            playing = false;
+        }
         if (sys != null && sysReady) {
-            try {
-                sys.stop();
-                busy = false;
-            } catch (Exception ignored) {}
+            try { sys.stop(); } catch (Exception ignored) {}
         }
         closeEdge();
         stopPlayer();

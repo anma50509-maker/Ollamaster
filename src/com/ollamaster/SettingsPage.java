@@ -504,34 +504,54 @@ public class SettingsPage extends Page {
         LinearLayout card = section(root, "语音合成 (TTS)");
         final Prefs p = Prefs.get(act);
 
-        // 引擎模式切换（旧版「系统引擎」已移除，老配置自动迁移到 Edge 免费）
-        if ("system".equals(p.ttsMode())) p.ttsMode("edge");
+        // 引擎模式切换（三通道：本地系统引擎 / Edge 免费 / HTTP 自定义 API）
         LinearLayout modeRow = baseRow(card);
-        rowTitle(modeRow, "引擎", "Edge 免费（微软·免Key）或 HTTP API");
+        rowTitle(modeRow, "引擎", "本地系统 · Edge 免费 · HTTP 自定义 API");
         LinearLayout modeBox = new LinearLayout(act);
         modeBox.setOrientation(LinearLayout.HORIZONTAL);
+        final LinearLayout btnSys = modeBtn("本地系统", "离线·免Key", "system".equals(p.ttsMode()));
         final LinearLayout btnEdge = modeBtn("Edge 免费", "微软·免Key", "edge".equals(p.ttsMode()));
-        final LinearLayout btnHttp = modeBtn("HTTP API", "第三方合成", "http".equals(p.ttsMode()));
-        LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(0, Ui.dpi(act, 52), 1f);
-        mlp.rightMargin = Ui.dpi(act, 6);
-        modeBox.addView(btnEdge, mlp);
+        final LinearLayout btnHttp = modeBtn("HTTP API", "自定义接口", "http".equals(p.ttsMode()));
+        int gap = Ui.dpi(act, 6);
+        LinearLayout.LayoutParams lp1 = new LinearLayout.LayoutParams(0, Ui.dpi(act, 52), 1f);
+        lp1.rightMargin = gap;
+        LinearLayout.LayoutParams lp2 = new LinearLayout.LayoutParams(0, Ui.dpi(act, 52), 1f);
+        lp2.rightMargin = gap;
+        modeBox.addView(btnSys, lp1);
+        modeBox.addView(btnEdge, lp2);
         modeBox.addView(btnHttp, new LinearLayout.LayoutParams(0, Ui.dpi(act, 52), 1f));
         modeRow.addView(modeBox, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        btnEdge.setOnClickListener(v -> {
-            p.ttsMode("edge");
-            rebuild();
-        });
-        btnHttp.setOnClickListener(v -> {
-            p.ttsMode("http");
-            rebuild();
-        });
+        btnSys.setOnClickListener(v -> { p.ttsMode("system"); rebuild(); });
+        btnEdge.setOnClickListener(v -> { p.ttsMode("edge"); rebuild(); });
+        btnHttp.setOnClickListener(v -> { p.ttsMode("http"); rebuild(); });
         hair(card);
 
+        if ("system".equals(p.ttsMode())) {
+            rowClick(card, "引擎状态", TtsEngine.get(act).sysError == null ? "已就绪（离线合成）" : TtsEngine.get(act).sysError,
+                    () -> Ui.toast(act, TtsEngine.get(act).sysError == null
+                            ? "本地系统 TTS 正常，可离线朗读" : TtsEngine.get(act).sysError));
+            hair(card);
+            sliderRow(card, "语速", 50, 200, Math.round(p.ttsSpeed() * 100), v -> v + "%", v -> p.ttsSpeed(v / 100f));
+            hair(card);
+            rowClick(card, "试听", "调用系统自带语音引擎（离线）", () -> {
+                TtsEngine.get(act).speak("你好，我是 Ollamaster。本地系统语音合成测试成功。");
+                Ui.toast(act, "正在用本地系统引擎朗读…");
+            });
+            hair(card);
+            rowClick(card, "停止朗读", "结束当前朗读", () -> {
+                TtsEngine.get(act).stop();
+                Ui.toast(act, "已停止");
+            });
+        }
+
         if ("edge".equals(p.ttsMode())) {
-            rowClick(card, "声音", p.ttsVoice().isEmpty() ? "zh-CN-XiaoxiaoNeural" : p.ttsVoice(), () ->
-                    inputDialog("声音", "Edge 声音名，如 zh-CN-XiaoxiaoNeural(晓晓女声) / zh-CN-YunxiNeural(云希男声) 等",
-                            p.ttsVoice().isEmpty() ? "zh-CN-XiaoxiaoNeural" : p.ttsVoice(), false, false, s2 -> {
-                                if (!s2.trim().isEmpty()) p.ttsVoice(s2.trim());
+            rowClick(card, "声音", p.ttsEdgeVoice().isEmpty() ? "zh-CN-XiaoxiaoNeural" : p.ttsEdgeVoice(), () ->
+                    inputDialog("Edge 声音", "Edge 声音名，如 zh-CN-XiaoxiaoNeural(晓晓女声) / zh-CN-YunxiNeural(云希男声) / en-US-EmmaMultilingualNeural 等",
+                            p.ttsEdgeVoice().isEmpty() ? "zh-CN-XiaoxiaoNeural" : p.ttsEdgeVoice(), false, false, s2 -> {
+                                if (!s2.trim().isEmpty()) {
+                                    if (!s2.trim().endsWith("Neural")) { Ui.toast(act, "Edge 声音名须以 Neural 结尾"); return; }
+                                    p.ttsEdgeVoice(s2.trim());
+                                }
                             }));
             hair(card);
             sliderRow(card, "语速", 50, 200, Math.round(p.ttsSpeed() * 100), v -> v + "%", v -> p.ttsSpeed(v / 100f));

@@ -125,7 +125,7 @@ public class LocalTools {
                 null, null, null));
         out.put(fn2("get_setting", "读取单个设置项的当前值",
                 new String[]{"key"}, new String[]{"设置键名，如 stream / ttsMode / autoTts"}, new String[]{"key"}));
-        out.put(fn2("set_setting", "修改应用设置（AI 自行配置入口）。支持键：host,hosts,port,timeoutSec,retryMax,editMode,themeName,customTheme,cBg,cAccent,cText,fontScale,stream,showThink,streamDiag,sysPrompt,cloudMode,cloudUrl,cloudKey,cloudModels,activeModel,activeCloudModel,ttsMode,ttsUrl,ttsKey,ttsModel,ttsVoice,ttsSpeed,autoTts,activeKeyIndex,apiKeyPool,workspace,imgEnabled,imgUrl,imgKey,imgModel,imgSize,imgStyle,imgDir,imgVisionModel,visionMode,visionUrl,visionKey,visionModelId,autoTitle,memInject,memInjectTop,targetInject,targetCompress,taskPlanning,subAgentEnabled,teamEnabled",
+        out.put(fn2("set_setting", "修改应用设置（AI 自行配置入口）。支持键：host,hosts,port,timeoutSec,retryMax,editMode,themeName,customTheme,cBg,cAccent,cText,fontScale,stream,showThink,streamDiag,sysPrompt,cloudMode,cloudUrl,cloudKey,cloudModels,activeModel,activeCloudModel,ttsMode,ttsUrl,ttsKey,ttsModel,ttsVoice,ttsEdgeVoice,ttsSpeed,autoTts,activeKeyIndex,apiKeyPool,workspace,imgEnabled,imgUrl,imgKey,imgModel,imgSize,imgStyle,imgDir,imgVisionModel,visionMode,visionUrl,visionKey,visionModelId,autoTitle,memInject,memInjectTop,targetInject,targetCompress,taskPlanning,subAgentEnabled,teamEnabled",
                 new String[]{"key", "value"},
                 new String[]{"设置键名（见描述）", "设置值：布尔用 true/false，数字用数值，字符串直接填写"},
                 new String[]{"key", "value"}));
@@ -705,11 +705,12 @@ public class LocalTools {
         sb.append("cloudModels = ").append(p.cloudModels()).append("\n");
         sb.append("activeModel = ").append(p.activeModel().isEmpty() ? "(自动)" : p.activeModel()).append("\n");
         sb.append("activeCloudModel = ").append(p.activeCloudModel().isEmpty() ? "(自动)" : p.activeCloudModel()).append("\n");
-        sb.append("ttsMode = ").append(p.ttsMode()).append("（system/http）\n");
+        sb.append("ttsMode = ").append(p.ttsMode()).append("（system/edge/http）\n");
         sb.append("ttsUrl = ").append(p.ttsUrl()).append("\n");
         sb.append("ttsKey = ").append(p.ttsKey().isEmpty() ? "(未设置)" : "••••已设置").append("\n");
         sb.append("ttsModel = ").append(p.ttsModel()).append("\n");
-        sb.append("ttsVoice = ").append(p.ttsVoice()).append("\n");
+        sb.append("ttsVoice = ").append(p.ttsVoice()).append("（HTTP 模式声音）\n");
+        sb.append("ttsEdgeVoice = ").append(p.ttsEdgeVoice().isEmpty() ? "(默认 zh-CN-XiaoxiaoNeural)" : p.ttsEdgeVoice()).append("\n");
         sb.append("ttsSpeed = ").append(p.ttsSpeed()).append("\n");
         sb.append("autoTts = ").append(p.autoTts()).append("（自动朗读 AI 回复）\n");
         sb.append("activeKeyIndex = ").append(p.activeKeyIndex()).append("\n");
@@ -770,6 +771,7 @@ public class LocalTools {
             case "ttsKey": return "ttsKey = " + (p.ttsKey().isEmpty() ? "(未设置)" : "••••已设置");
             case "ttsModel": return "ttsModel = " + p.ttsModel();
             case "ttsVoice": return "ttsVoice = " + p.ttsVoice();
+            case "ttsEdgeVoice": return "ttsEdgeVoice = " + (p.ttsEdgeVoice().isEmpty() ? "(默认)" : p.ttsEdgeVoice());
             case "ttsSpeed": return "ttsSpeed = " + p.ttsSpeed();
             case "autoTts": return "autoTts = " + p.autoTts();
             case "activeKeyIndex": return "activeKeyIndex = " + p.activeKeyIndex();
@@ -849,6 +851,10 @@ public class LocalTools {
             case "ttsKey": p.ttsKey(v); break;
             case "ttsModel": p.ttsModel(v); break;
             case "ttsVoice": p.ttsVoice(v); break;
+            case "ttsEdgeVoice":
+                if (!v.trim().isEmpty() && !v.trim().endsWith("Neural"))
+                    throw new Exception("ttsEdgeVoice 必须是 Edge 神经语音名（以 Neural 结尾），如 zh-CN-XiaoxiaoNeural");
+                p.ttsEdgeVoice(v.trim()); break;
             case "ttsSpeed": p.ttsSpeed(parseFloat(v, "ttsSpeed")); break;
             case "autoTts": p.autoTts(parseBool(v, "autoTts")); break;
             case "activeKeyIndex": p.activeKeyIndex(parseInt(v, "activeKeyIndex")); break;
