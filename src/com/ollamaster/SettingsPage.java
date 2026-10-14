@@ -3,6 +3,7 @@ package com.ollamaster;
 import android.annotation.SuppressLint;
 import android.app.Dialog;
 import android.content.Intent;
+import android.os.Build;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.net.Uri;
@@ -43,6 +44,7 @@ public class SettingsPage extends Page {
         buildChatSection(root);
         buildContextSection(root);
         buildTtsSection(root);
+        buildFloatSection(root);
         buildImgSection(root);
         buildVisionSection(root);
         buildCloudSection(root);
@@ -498,6 +500,74 @@ public class SettingsPage extends Page {
         LinearLayout ar = baseRow(card);
         rowTitle(ar, "AI 自主会话命名", "首轮回复完成后自动生成会话标题");
         addSwitch(ar, p.autoTitle(), (b, on) -> p.autoTitle(on));
+    }
+
+    /** 悬浮球：显示进行中任务 + 前台保活；含悬浮窗权限申请与引导 */
+    private void buildFloatSection(LinearLayout root) {
+        LinearLayout card = section(root, "悬浮球");
+        final Prefs p = Prefs.get(act);
+
+        LinearLayout r1 = baseRow(card);
+        rowTitle(r1, "启用悬浮球", "桌面悬浮球显示进行中任务；服务前台化减少被杀");
+        addSwitch(r1, p.floatBall(), (b, on) -> {
+            if (on && !android.provider.Settings.canDrawOverlays(act)) {
+                // 未授权悬浮窗：先落盘开关，再引导去系统设置授权；回来后 sync 自动拉起
+                p.floatBall(true);
+                Ui.toast(act, "需要「显示在其他应用上层」权限，请在接下来页面允许");
+                try {
+                    act.startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                            android.net.Uri.parse("package:" + act.getPackageName())));
+                } catch (Throwable e) {
+                    try {
+                        act.startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION));
+                    } catch (Throwable ignored) { Ui.toast(act, "请手动在系统设置中授予悬浮窗权限"); }
+                }
+            } else {
+                p.floatBall(on);
+                try { FloatBallService.sync(act); } catch (Throwable e) { ErrLog.log(act, "floatSync", e); }
+                Ui.toast(act, on ? "悬浮球已开启" : "悬浮球已关闭");
+            }
+        });
+        hair(card);
+
+        rowClick(card, "悬浮窗权限", android.provider.Settings.canDrawOverlays(act) ? "已授权" : "未授权，点击前往授权",
+                () -> {
+                    try {
+                        act.startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                android.net.Uri.parse("package:" + act.getPackageName())));
+                    } catch (Throwable e) {
+                        try { act.startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION)); }
+                        catch (Throwable ignored) { Ui.toast(act, "无法打开系统设置"); }
+                    }
+                });
+        hair(card);
+
+        rowClick(card, "通知权限（保活通知）", "悬浮球依赖前台通知常驻，未授权可在系统设置开启",
+                () -> {
+                    if (Build.VERSION.SDK_INT >= 33) {
+                        try {
+                            act.requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, 4002);
+                        } catch (Throwable e) { Ui.toast(act, "请在系统设置中允许应用通知"); }
+                    } else {
+                        try {
+                            Intent it = new Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS);
+                            it.putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, act.getPackageName());
+                            act.startActivity(it);
+                        } catch (Throwable ignored) { Ui.toast(act, "请在系统设置中允许应用通知"); }
+                    }
+                });
+        hair(card);
+
+        rowClick(card, "电池优化（建议）", "加入白名单可进一步降低后台被杀概率",
+                () -> {
+                    try {
+                        act.startActivity(new Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+                    } catch (Throwable e1) {
+                        try {
+                            act.startActivity(new Intent(android.provider.Settings.ACTION_SETTINGS));
+                        } catch (Throwable ignored) { Ui.toast(act, "无法打开系统设置"); }
+                    }
+                });
     }
 
     private void buildTtsSection(LinearLayout root) {
@@ -960,5 +1030,7 @@ public class SettingsPage extends Page {
     @Override
     public void onShow() {
         t = Theme.of(act);
+        // 从系统授权页返回后，按当前开关与权限状态对齐悬浮球服务
+        try { FloatBallService.sync(act); } catch (Throwable ignored) {}
     }
 }

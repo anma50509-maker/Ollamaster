@@ -115,6 +115,10 @@ public class Prefs {
     public void ttsSpeed(float v) { sp.edit().putFloat("ttsSpeed", v).apply(); }
 
     /** 自动语音：AI 每句回复生成完成后自动朗读 */
+    /** 悬浮球：显示进行中任务 + 前台保活（需 SYSTEM_ALERT_WINDOW 悬浮窗权限） */
+    public boolean floatBall() { return sp.getBoolean("floatBall", false); }
+    public void floatBall(boolean v) { sp.edit().putBoolean("floatBall", v).apply(); }
+
     public boolean autoTts() { return sp.getBoolean("autoTts", false); }
     public void autoTts(boolean v) { sp.edit().putBoolean("autoTts", v).apply(); }
 

@@ -55,6 +55,9 @@ public class ChatPage extends Page {
     private FrameLayout sendBtn;
     private TextView modelChip, personaChip, sysChip;
     private TextView autoTtsBtn;
+    private TextView taskChipBtn;      // 工具栏「任务」入口按钮
+    private Dialog taskDialog;         // 任务队列弹窗
+    private LinearLayout taskDialogBox; // 弹窗内容容器
     private ImageView attachBtn;
     private LinearLayout attachRow;
     private ImageView emptyAvatar;
@@ -213,9 +216,8 @@ public class ChatPage extends Page {
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
         activityBar = buildActivityBar();
         root.addView(activityBar);
-        // 任务层固定 UI：活动任务的全步骤常驻显示（不随消息滚动、不占用对话流）
+        // 任务队列改为弹窗形式（工具栏「任务」按钮打开）；内嵌任务条不再加入视图树
         taskBar = buildTaskBar();
-        root.addView(taskBar);
         root.addView(buildComposer());
         // 多智能体可视化的实时通道：后台运行轨迹一变就刷新活动条
         AgentActivity.setListener(() -> Ui.H.post(this::refreshActivityBar));
@@ -464,67 +466,228 @@ public class ChatPage extends Page {
     }
 
     private void refreshTaskBar() {
-        if (taskBar == null || act == null) return;
-        // 启动期全局屏蔽：应用未完全就绪前，绝不显示任务栏
-        if (App.sStartupGuard) {
-            taskBar.setVisibility(View.GONE);
-            taskTicking = false;
-            return;
+        boolean running = false;
+        String badge = "任务";
+        if (!App.sStartupGuard && conv != null && uiAlive()) {
+            try {
+                TaskStore.Task tk = TaskStore.active(act, conv.id);
+                if (tk != null) {
+                    running = TaskStore.ST_RUNNING.equals(tk.status);
+                    badge = "任务 " + tk.doneCount() + "/" + tk.total();
+                }
+            } catch (Throwable ignored) {}
         }
-        // 无当前会话（conv 为 null）时不显示任务条，避免启动/切页误触发
-        if (conv == null) {
-            taskBar.setVisibility(View.GONE);
-            taskTicking = false;
-            return;
+        if (taskChipBtn != null) {
+            taskChipBtn.setText(badge);
+            taskChipBtn.setTextColor(running ? t.accent : t.textSec);
         }
-        TaskStore.Task task;
+        // 任务弹窗打开期间实时刷新内容（TaskStore 落盘回调会触发本方法）
+        if (taskDialog != null && taskDialog.isShowing()) {
+            try { renderTaskDialogContent(); } catch (Throwable ignored) {}
+        }
+    }
+
+    // ==================== 任务队列弹窗 ====================
+
+    /** 弹窗形式查看任务队列：活动任务卡片（进度+步骤）+ 最近任务列表 */
+    private void showTaskSheet() {
+        if (taskDialog != null && taskDialog.isShowing()) return;
         try {
-            task = TaskStore.active(act, conv.id);
+            LinearLayout box = new LinearLayout(act);
+            box.setOrientation(LinearLayout.VERTICAL);
+            box.addView(Ui.title(act, t, "任务队列"));
+            box.addView(Ui.gap(act, 8));
+            taskDialogBox = new LinearLayout(act);
+            taskDialogBox.setOrientation(LinearLayout.VERTICAL);
+            box.addView(taskDialogBox, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            box.addView(Ui.gap(act, 10));
+            LinearLayout row = new LinearLayout(act);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.END);
+            TextView refresh = Ui.btnGhost(act, t, "刷新");
+            refresh.setOnClickListener(v -> { try { renderTaskDialogContent(); } catch (Throwable ignored) {} });
+            row.addView(refresh, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            TextView close = Ui.btnGhost(act, t, "关闭");
+            close.setOnClickListener(v -> { if (taskDialog != null) taskDialog.dismiss(); });
+            LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            clp.leftMargin = Ui.dpi(act, 8);
+            row.addView(close, clp);
+            box.addView(row, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            taskDialog = Ui.center(act, box, t);
+            renderTaskDialogContent();
+            taskDialog.show();
         } catch (Throwable e) {
-            taskBar.setVisibility(View.GONE);
-            return;
+            Ui.toast(act, "无法打开任务面板：" + e.getMessage());
         }
-        if (task == null) {
-            taskBar.setVisibility(View.GONE);
-            taskTicking = false;
-            taskSig = "";
-            return;
+    }
+
+    /** 重建弹窗内容：活动任务卡片 + 最近任务（最多 6 条） */
+    private void renderTaskDialogContent() {
+        if (taskDialogBox == null || !uiAlive()) return;
+        taskDialogBox.removeAllViews();
+        try {
+            java.util.List<TaskStore.Task> all = TaskStore.list(act);
+            TaskStore.Task cur = null;
+            try { cur = TaskStore.active(act, conv == null ? null : conv.id); } catch (Throwable ignored) {}
+            if (cur == null) {
+                for (TaskStore.Task x : all) {
+                    if (TaskStore.ST_RUNNING.equals(x.status)) { cur = x; break; }
+                }
+            }
+            if (all.isEmpty()) {
+                taskDialogBox.addView(Ui.caption(act, t,
+                        "当前没有任务。AI 创建任务（task_create）后，可在此查看实时进度。"));
+                return;
+            }
+            if (cur != null) taskDialogBox.addView(taskCard(cur));
+            int shown = 0;
+            LinearLayout hist = new LinearLayout(act);
+            hist.setOrientation(LinearLayout.VERTICAL);
+            for (TaskStore.Task x : all) {
+                if (cur != null && x.id.equals(cur.id)) continue;
+                if (shown >= 6) break;
+                hist.addView(taskHistoryRow(x));
+                shown++;
+            }
+            if (shown > 0) {
+                View dv = new View(act);
+                dv.setBackground(Ui.round(t.alpha(t.border, 0.6f), Ui.dpi(act, 1)));
+                LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, Ui.dpi(act, 1));
+                dlp.topMargin = Ui.dpi(act, 12);
+                dlp.bottomMargin = Ui.dpi(act, 6);
+                taskDialogBox.addView(dv, dlp);
+                taskDialogBox.addView(Ui.caption(act, t, "最近任务"));
+                taskDialogBox.addView(Ui.gap(act, 2));
+                taskDialogBox.addView(hist, new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            }
+        } catch (Throwable e) {
+            taskDialogBox.addView(Ui.caption(act, t, "读取任务失败：" + e.getMessage()));
         }
-        // 双重校验：任务必须属于当前会话（防止跨会话泄漏）
-        if (conv.id == null || !conv.id.equals(task.convId)) {
-            taskBar.setVisibility(View.GONE);
-            taskTicking = false;
-            return;
-        }
-        // 仅 RUNNING 状态才显示任务栏；PENDING/PAUSED/终态均隐藏
-        String st = task.status;
-        if (!TaskStore.ST_RUNNING.equals(st)) {
-            taskBar.setVisibility(View.GONE);
-            taskTicking = false;
-            return;
-        }
-        String sig = task.id + "|" + task.status + "|" + task.updated + "|"
-                + task.total() + "|" + task.doneCount() + "|" + taskCollapsed
-                + "|" + (conv == null ? "" : conv.id);
-        if (!sig.equals(taskSig)) {
-            taskSig = sig;
-            rebuildTaskSteps(task);
-        }
-        taskTitle.setText(task.title == null || task.title.isEmpty() ? "未命名任务" : task.title);
-        taskMeta.setText(TaskStore.statusCn(task.status) + "  " + task.doneCount() + "/" + task.total());
-        taskToggle.setText(taskCollapsed ? "展开" : "收起");
-        taskStepsBox.setVisibility(taskCollapsed ? View.GONE : View.VISIBLE);
+    }
+
+    /** 活动任务卡片：标题/状态/进度条/步骤列表（最多 10 条） */
+    private View taskCard(TaskStore.Task task) {
+        LinearLayout card = new LinearLayout(act);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackground(Ui.stroke(t.surfaceAlt, t.border, Ui.dpi(act, 14), Ui.dpi(act, 0.7f)));
+        int pad = Ui.dpi(act, 12);
+        card.setPadding(pad, pad, pad, pad);
+
+        String ttl = task.title == null || task.title.isEmpty() ? "未命名任务" : task.title;
+        TextView title = new TextView(act);
+        title.setText(ttl);
+        title.setTextColor(t.textPri);
+        title.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 14.5f));
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        card.addView(title);
+
+        TextView meta = Ui.caption(act, t, TaskStore.statusCn(task.status) + "  ·  进度 "
+                + task.doneCount() + "/" + task.total());
+        LinearLayout.LayoutParams mlp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        mlp.topMargin = Ui.dpi(act, 3);
+        card.addView(meta, mlp);
+
+        LinearLayout track = new LinearLayout(act);
+        track.setBackground(Ui.round(t.alpha(t.textPri, 0.10f), Ui.dpi(act, 999)));
+        View fill = new View(act);
+        fill.setBackground(Ui.round(t.accent, Ui.dpi(act, 999)));
         float frac = task.total() <= 0 ? 0.05f
                 : Math.max(0.05f, Math.min(1f, task.doneCount() * 1f / task.total()));
-        taskBarFill.setLayoutParams(new LinearLayout.LayoutParams(0, Ui.dpi(act, 3), frac));
-        // 兜底检查已在前面完成，此处直接显示
-        if (taskBar.getVisibility() != View.VISIBLE) taskBar.setVisibility(View.VISIBLE);
-        // 执行中才开计时心跳（刷新耗时/状态），完成后停跳省电
-        if (TaskStore.ST_RUNNING.equals(task.status) || TaskStore.ST_PENDING.equals(task.status)) {
-            if (!taskTicking) { taskTicking = true; tickTask(); }
-        } else {
-            taskTicking = false;
+        track.addView(fill, new LinearLayout.LayoutParams(0, Ui.dpi(act, 4), frac));
+        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, Ui.dpi(act, 4));
+        tlp.topMargin = Ui.dpi(act, 8);
+        tlp.bottomMargin = Ui.dpi(act, 4);
+        card.addView(track, tlp);
+
+        int n = task.steps == null ? 0 : task.steps.size();
+        int show = Math.min(n, TASK_STEP_SHOW_MAX);
+        for (int i = 0; i < show; i++) card.addView(taskStepRow(task.steps.get(i), i));
+        if (n > show) {
+            TextView more = Ui.caption(act, t, "…另有 " + (n - show)
+                    + " 步未展开（可让 AI 调用 task_status 查看完整列表）");
+            LinearLayout.LayoutParams plp2 = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            plp2.topMargin = Ui.dpi(act, 6);
+            card.addView(more, plp2);
         }
+        if (n == 0) {
+            card.addView(Ui.caption(act, t, "（尚无步骤，AI 可用 task_update action=add_step 补充）"));
+        }
+        return card;
+    }
+
+    /** 步骤行：状态符号 + 名称 + 工具/结果摘要 */
+    private View taskStepRow(TaskStore.Step s, int idx) {
+        LinearLayout srow = new LinearLayout(act);
+        srow.setOrientation(LinearLayout.HORIZONTAL);
+        srow.setGravity(Gravity.CENTER_VERTICAL);
+        int color = taskColor(s.status);
+        TextView gl = new TextView(act);
+        gl.setText(taskGlyph(s.status));
+        gl.setTextColor(color);
+        gl.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 12));
+        gl.setGravity(Gravity.CENTER);
+        gl.setBackground(Ui.round(t.alpha(color, 0.14f), Ui.dpi(act, 999)));
+        srow.addView(gl, new LinearLayout.LayoutParams(Ui.dpi(act, 20), Ui.dpi(act, 20)));
+
+        LinearLayout col = new LinearLayout(act);
+        col.setOrientation(LinearLayout.VERTICAL);
+        TextView name = new TextView(act);
+        name.setText((idx + 1) + ". " + s.name);
+        name.setSingleLine(true);
+        name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        boolean cur = TaskStore.ST_RUNNING.equals(s.status);
+        name.setTextColor(cur ? t.accent : t.textPri);
+        if (cur) name.setTypeface(Typeface.DEFAULT_BOLD);
+        name.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 12.5f));
+        col.addView(name, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        StringBuilder m = new StringBuilder();
+        if (s.toolName != null && !s.toolName.isEmpty()) m.append("<").append(s.toolName).append(">");
+        if (s.attempts > 0) m.append(" 尝试").append(s.attempts).append("次");
+        if (s.result != null && !s.result.isEmpty()) {
+            String r = s.result.replace("\n", " ");
+            if (r.length() > 60) r = r.substring(0, 60) + "…";
+            if (m.length() > 0) m.append("  ");
+            m.append(r);
+        }
+        if (m.length() > 0) {
+            TextView mt = Ui.caption(act, t, m.toString());
+            mt.setSingleLine(true);
+            mt.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            col.addView(mt, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        }
+        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        clp.leftMargin = Ui.dpi(act, 8);
+        clp.topMargin = Ui.dpi(act, 5);
+        srow.addView(col, clp);
+        return srow;
+    }
+
+    /** 最近任务单行摘要 */
+    private View taskHistoryRow(TaskStore.Task x) {
+        TextView row = new TextView(act);
+        String tl = x.title == null || x.title.isEmpty() ? "未命名任务" : x.title;
+        if (tl.length() > 24) tl = tl.substring(0, 24) + "…";
+        row.setText(taskGlyph(x.status) + "  " + tl
+                + "   ·  " + TaskStore.statusCn(x.status)
+                + (x.total() > 0 ? " " + x.doneCount() + "/" + x.total() : ""));
+        row.setSingleLine(true);
+        row.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        row.setTextColor(t.textSec);
+        row.setTextSize(TypedValue.COMPLEX_UNIT_PX, Ui.sp(act, 11.5f));
+        row.setPadding(0, Ui.dpi(act, 4), 0, Ui.dpi(act, 4));
+        return row;
     }
 
     private void tickTask() {
@@ -664,6 +827,13 @@ public class ChatPage extends Page {
         bar.addView(sysChip, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, Ui.dpi(act, 30)));
         ((LinearLayout.LayoutParams) sysChip.getLayoutParams()).rightMargin = Ui.dpi(act, 6);
+
+        // 任务队列入口：弹窗查看任务进度（原内嵌任务条已废弃）
+        taskChipBtn = Ui.btnGhost(act, t, "任务");
+        taskChipBtn.setOnClickListener(v -> showTaskSheet());
+        bar.addView(taskChipBtn, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, Ui.dpi(act, 30)));
+        ((LinearLayout.LayoutParams) taskChipBtn.getLayoutParams()).rightMargin = Ui.dpi(act, 6);
 
         autoTtsBtn = Ui.chip(act, t, "语音", Prefs.get(act).autoTts());
         Icon.pinLeft(autoTtsBtn, Prefs.get(act).autoTts() ? "voice" : "voiceOff", 13);
@@ -3258,11 +3428,7 @@ public class ChatPage extends Page {
 
     @Override
     public void onShow() {
-        // 【最高优先级】无论任何情况，先强制隐藏 taskBar
-        if (taskBar != null) {
-            taskBar.setVisibility(View.GONE);
-            taskTicking = false;
-        }
+        // 任务队列已改为弹窗形式；此处仅需随 onShow 刷新工具栏「任务」按钮状态
         t = Theme.of(act);
         personas = findPersonaList();
         if (emptyChipsRow != null) refreshEmptyChips(emptyChipsRow);

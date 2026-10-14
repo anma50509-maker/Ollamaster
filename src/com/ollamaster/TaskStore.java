@@ -135,8 +135,9 @@ public class TaskStore {
             if (f.getBoolean(null)) return;  // 启动屏蔽期，直接返回
         } catch (Throwable ignored) {}
         Runnable r = sListener;
-        if (r == null) return;
-        try { r.run(); } catch (Throwable ignored) {}
+        if (r != null) { try { r.run(); } catch (Throwable ignored) {} }
+        // 悬浮球实时反映任务进度（内部自判 sRunning，未开启时零开销）
+        try { FloatBallService.notifyTasks(); } catch (Throwable ignored) {}
     }
 
     /** 读取全部任务（按更新时间倒序），首次读取时做崩溃恢复：RUNNING → PAUSED */
