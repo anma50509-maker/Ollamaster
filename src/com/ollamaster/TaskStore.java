@@ -277,18 +277,33 @@ public class TaskStore {
     // ==================== 查找 ====================
 
     /** 取某会话当前活动任务（仅 RUNNING；PENDING/PAUSED/终态均不返回，启动不自动显示旧任务） */
+    /** 获取会话当前最值得展示的任务：
+     *  - 优先 RUNNING
+     *  - 其次 PENDING（新建即显示，不等用户点开始）
+     *  - 再次 PAUSED
+     *  - 仅当前会话（convId 为空则全局）
+     */
     public static Task active(Context c, String convId) {
         List<Task> all = list(c);
         Task candidate = null;
         for (Task t : all) {
             if (convId != null && !convId.isEmpty() && !convId.equals(t.convId)) continue;
             String st = t.status;
-            // 仅 RUNNING 视为真正活动；PENDING/PAUSED 需用户主动恢复，不自动上屏
-            if (ST_RUNNING.equals(st)) {
-                if (candidate == null || t.updated > candidate.updated) candidate = t;
+            int prio = priority(st);
+            if (prio < 0) continue;  // 已完成/失败/取消等终态跳过
+            if (candidate == null || prio > priority(candidate.status)
+                    || (prio == priority(candidate.status) && t.updated > candidate.updated)) {
+                candidate = t;
             }
         }
-        return candidate;  // 无活动任务返回 null
+        return candidate;
+    }
+
+    private static int priority(String st) {
+        if (ST_RUNNING.equals(st)) return 3;
+        if (ST_PENDING.equals(st)) return 2;
+        if (ST_PAUSED.equals(st)) return 1;
+        return -1;  // DONE/COMPLETED/FAILED/CANCELLED/SKIPPED
     }
 
     public static Task find(Context c, String id) {

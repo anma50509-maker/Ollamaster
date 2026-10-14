@@ -502,6 +502,8 @@ public class SettingsPage extends Page {
         addSwitch(ar, p.autoTitle(), (b, on) -> p.autoTitle(on));
     }
 
+    private boolean overlayHintPending = false;
+
     /** 悬浮球：显示进行中任务 + 前台保活；含悬浮窗权限申请与引导 */
     private void buildFloatSection(LinearLayout root) {
         LinearLayout card = section(root, "悬浮球");
@@ -513,7 +515,8 @@ public class SettingsPage extends Page {
             if (on && !android.provider.Settings.canDrawOverlays(act)) {
                 // 未授权悬浮窗：先落盘开关，再引导去系统设置授权；回来后 sync 自动拉起
                 p.floatBall(true);
-                Ui.toast(act, "需要「显示在其他应用上层」权限，请在接下来页面允许");
+                overlayHintPending = true;
+                Ui.toast(act, "请在接下来页面允许「显示悬浮窗」；若开关灰色或提示受限：系统设置→应用→Ollamaster→右上角⋮→允许受限设置");
                 try {
                     act.startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                             android.net.Uri.parse("package:" + act.getPackageName())));
@@ -542,17 +545,18 @@ public class SettingsPage extends Page {
                 });
         hair(card);
 
-        rowClick(card, "通知权限（保活通知）", "悬浮球依赖前台通知常驻，未授权可在系统设置开启",
+        rowClick(card, "通知权限（保活通知）", "悬浮球依赖前台通知常驻，点击直达系统开关页",
                 () -> {
-                    if (Build.VERSION.SDK_INT >= 33) {
+                    // 不走运行时 requestPermissions：被系统自动拒绝时只会弹「已拒绝」提示；
+                    // 直达系统通知开关页手动打开，路径更短且不触发受限拦截
+                    Intent it = new Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS);
+                    it.putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, act.getPackageName());
+                    try {
+                        act.startActivity(it);
+                    } catch (Throwable e) {
                         try {
-                            act.requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, 4002);
-                        } catch (Throwable e) { Ui.toast(act, "请在系统设置中允许应用通知"); }
-                    } else {
-                        try {
-                            Intent it = new Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS);
-                            it.putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, act.getPackageName());
-                            act.startActivity(it);
+                            act.startActivity(new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                    android.net.Uri.parse("package:" + act.getPackageName())));
                         } catch (Throwable ignored) { Ui.toast(act, "请在系统设置中允许应用通知"); }
                     }
                 });
@@ -1032,5 +1036,11 @@ public class SettingsPage extends Page {
         t = Theme.of(act);
         // 从系统授权页返回后，按当前开关与权限状态对齐悬浮球服务
         try { FloatBallService.sync(act); } catch (Throwable ignored) {}
+        if (overlayHintPending) {
+            overlayHintPending = false;
+            if (Prefs.get(act).floatBall() && !android.provider.Settings.canDrawOverlays(act)) {
+                Ui.toast(act, "悬浮窗仍未授权：系统设置→应用→Ollamaster→右上角⋮→「允许受限设置」后重试");
+            }
+        }
     }
 }
